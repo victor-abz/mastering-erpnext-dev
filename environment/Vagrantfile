@@ -1,0 +1,176 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# Mastering ERPNext Development - Chapter 2
+# Vagrantfile for Frappe Development Environment
+
+Vagrant.configure("2") do |config|
+  # Base box
+  config.vm.box = "ubuntu/focal64"
+  
+  # Network configuration
+  config.vm.network "forwarded_port", guest: 8000, host: 8000  # Frappe web server
+  config.vm.network "forwarded_port", guest: 3306, host: 3306  # MariaDB
+  config.vm.network "forwarded_port", guest: 9000, host: 9000  # SocketIO
+  config.vm.network "forwarded_port", guest: 8080, host: 8080  # PhpMyAdmin
+  
+  # Hardware requirements
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = "4096"
+    vb.cpus = "2"
+    vb.name = "frappe-dev"
+  end
+  
+  # System requirements
+  config.vm.provider "virtualbox" do |vb|
+    vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+    vb.customize ["modifyvm", :id, "--natdnsproxy1", "on"]
+  end
+  
+  # Provisioning script
+  config.vm.provision "shell", inline: <<-SHELL
+    echo "=== Starting Frappe Development Environment Setup ==="
+    
+    # Update system
+    apt-get update
+    apt-get upgrade -y
+    
+    # Install basic dependencies
+    apt-get install -y \
+      python3-dev python3-pip python3-venv \
+      python3-setuptools python3-wheel \
+      git redis-server \
+      build-essential libssl-dev libffi-dev \
+      libjpeg-dev libpng-dev libwebp-dev \
+      xvfb libfontconfig1 libxrender1 \
+      curl wget gnupg2 software-properties-common \
+      mariadb-server mariadb-client \
+      nodejs npm \
+      vim htop tree
+    
+    # Configure MariaDB
+    mysql -u root -e "
+      DELETE FROM mysql.user WHERE User='';
+      DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+      DROP DATABASE IF EXISTS test;
+      DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+      FLUSH PRIVILEGES;
+      CREATE USER IF NOT EXISTS 'frappe'@'localhost' IDENTIFIED BY 'frappe';
+      GRANT ALL PRIVILEGES ON *.* TO 'frappe'@'localhost';
+      FLUSH PRIVILEGES;
+    "
+    
+    # Create frappe user
+    useradd -m -s /bin/bash frappe
+    usermod -aG sudo frappe
+    
+    # Install Node.js dependencies
+    npm install -g yarn
+    npm install -g frappe-cli
+    
+    # Create development directory
+    mkdir -p /home/frappe/frappe-bench
+    chown frappe:frappe /home/frappe/frappe-bench
+    
+    # Install Python dependencies for frappe user
+    sudo -u frappe python3 -m venv /home/frappe/frappe-bench/env
+    sudo -u frappe /home/frappe/frappe-bench/env/bin/pip install --upgrade pip setuptools wheel
+    sudo -u frappe /home/frappe/frappe-bench/env/bin/pip install frappe-bench
+    
+    # Create bench
+    cd /home/frappe/frappe-bench
+    sudo -u frappe /home/frappe/frappe-bench/env/bin/bench init . --frappe-branch version-15
+    
+    # Create development site
+    sudo -u frappe /home/frappe/frappe-bench/env/bin/bench new-site dev.local \
+      --mariadb-root-password root \
+      --admin-password admin \
+      --install-app erpnext
+    
+    # Set up bench configuration
+    sudo -u frappe /home/frappe/frappe-bench/env/bin/bench use dev.local
+    sudo -u frappe /home/frappe/frappe-bench/env/bin/bench set-config developer_mode 1
+    
+    # Create startup script
+    cat > /home/frappe/start-bench.sh << 'EOF'
+#!/bin/bash
+cd /home/frappe/frappe-bench
+/home/frappe/frappe-bench/env/bin/bench start
+EOF
+    chmod +x /home/frappe/start-bench.sh
+    chown frappe:frappe /home/frappe/start-bench.sh
+    
+    # Create utility scripts
+    cat > /home/frappe/backup-site.sh << 'EOF'
+#!/bin/bash
+cd /home/frappe/frappe-bench
+BACKUP_DIR="/home/frappe/backups/$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+/home/frappe/frappe-bench/env/bin/bench --site dev.local backup --with-files --backup-path "$BACKUP_DIR"
+echo "Backup completed: $BACKUP_DIR"
+EOF
+    chmod +x /home/frappe/backup-site.sh
+    chown frappe:frappe /home/frappe/backup-site.sh
+    
+    # System configuration
+    echo "=== Configuring System ==="
+    
+    # Configure Redis
+    systemctl enable redis-server
+    systemctl start redis-server
+    
+    # Configure MariaDB
+    systemctl enable mariadb
+    systemctl start mariadb
+    
+    # Set up bash aliases for frappe user
+    cat >> /home/frappe/.bashrc << 'EOF'
+
+# Frappe aliases
+alias bench='cd /home/frappe/frappe-bench && /home/frappe/frappe-bench/env/bin/bench'
+alias bench-console='bench --site dev.local console'
+alias bench-restart='bench restart'
+alias bench-backup='/home/frappe/backup-site.sh'
+alias bench-start='/home/frappe/start-bench.sh'
+
+# Custom prompt
+export PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+EOF
+    
+    # Create motd
+    cat > /etc/motd << 'EOF'
+========================================
+    Frappe Development Environment
+========================================
+
+Access your Frappe site:
+  URL: http://localhost:8000
+  Username: Administrator
+  Password: admin
+
+Useful commands:
+  bench                    # Go to bench directory
+  bench-console            # Open Python console
+  bench-restart            # Restart services
+  bench-backup             # Backup site
+  bench-start              # Start services
+
+Database access:
+  Host: localhost:3306
+  User: root / frappe
+  Password: root / frappe
+
+PhpMyAdmin:
+  URL: http://localhost:8080
+
+Happy coding! 🚀
+========================================
+EOF
+    
+    echo "=== Setup Complete ==="
+    echo "Reboot the VM to apply all changes"
+  SHELL
+  
+  # Post-provision message
+  config.vm.post_up_message = "Frappe development environment is ready! Access at http://localhost:8000"
+end

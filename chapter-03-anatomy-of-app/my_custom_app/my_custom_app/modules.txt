@@ -1,0 +1,4 @@
+My Custom App,octicon octicon-package,grey,My Custom App
+Asset Management,octicon octicon-package,blue,Asset Management
+Reports,octicon octicon-graph,orange,Reports
+Settings,octicon octicon-gear,grey,Settings
