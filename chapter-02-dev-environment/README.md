@@ -2,106 +2,348 @@
 
 ## 🎯 Learning Objectives
 
-By the end of this chapter, you will be able to:
+By the end of this chapter, you will master:
 
-- Set up Bench on Linux, macOS, and Windows WSL
-- Master essential Bench commands for development
-- Understand the Bench directory structure
-- Configure Git integration for version control
-- Manage multiple development sites
-- Set up VS Code for optimal Frappe development
+- **Why** Bench uses a multi-site architecture for development workflow
+- **How** Bench commands work internally and when to use each
+- **Professional Git workflow** for Frappe app development
+- **Debugging and troubleshooting** techniques for complex issues
+- **Performance optimization** of development environment
+- **Production-ready** setup practices for team collaboration
 
 ## 📚 Chapter Topics
 
-### 2.1 Setting up Bench
+### 2.1 Understanding Bench Architecture
 
-#### System Requirements
+**Why Bench Uses Multi-Site Architecture**
 
-**Minimum Requirements:**
-- 4GB RAM (8GB recommended)
-- 20GB disk space
-- Python 3.8+
-- Node.js 14+
-- Redis server
-- MariaDB 10.3+
+Bench's multi-site architecture is a deliberate design choice that enables professional development workflows:
 
-**Supported Platforms:**
-- Ubuntu 18.04+ / Debian 10+
-- macOS 10.15+
-- Windows 10+ with WSL2
-
-#### Installation Methods
-
-**Method 1: Automated Install (Recommended)**
-```bash
-# Install dependencies
-curl -sL https://raw.githubusercontent.com/frappe/bench/develop/install.py | python3 - --production
-
-# Create your first bench
-bench init frappe-bench
-cd frappe-bench
+```python
+# Bench's internal architecture (simplified)
+class Bench:
+    def __init__(self, bench_path):
+        self.bench_path = bench_path
+        self.sites_path = os.path.join(bench_path, 'sites')
+        self.apps_path = os.path.join(bench_path, 'apps')
+        self.config = self.load_bench_config()
+    
+    def get_sites(self):
+        """Returns all sites in this bench"""
+        return [d for d in os.listdir(self.sites_path) 
+                if os.path.isdir(os.path.join(self.sites_path, d))]
+    
+    def use_site(self, site_name):
+        """Set active site for operations"""
+        self.active_site = site_name
+        self.site_config = self.load_site_config(site_name)
 ```
 
-**Method 2: Manual Install**
-```bash
-# Clone bench repository
-git clone https://github.com/frappe/bench bench-repo
-sudo pip3 install -e bench-repo
+**The Professional Development Workflow:**
 
-# Initialize bench
-bench init frappe-bench --frappe-path https://github.com/frappe/frappe
+| Environment | Purpose | Database | Configuration |
+|-------------|---------|----------|---------------|
+| **dev.local** | Active development | Separate | Developer mode enabled |
+| **test.local** | Feature testing | Separate | Test data fixtures |
+| **staging.local** | Pre-production | Separate | Production-like config |
+| **prod.local** | Production | Separate | Production settings |
+
+**Why This Architecture Works:**
+
+1. **Isolation**: Each site has its own database and configuration
+2. **Consistency**: Same codebase runs across all environments
+3. **Safety**: Development doesn't affect testing or production
+4. **Portability**: Easy to move between environments
+
+#### Advanced Installation Strategies
+
+**Production-Grade Setup:**
+```bash
+# 1. Create dedicated system user
+sudo useradd -m -s /bin/bash frappe
+sudo usermod -aG sudo frappe
+
+# 2. Set up proper permissions
+sudo chown -R frappe:frappe /opt/frappe
+chmod 755 /opt/frappe
+
+# 3. Install with production flags
+bench init /opt/frappe/frappe-bench \
+    --frappe-branch version-15 \
+    --python python3.10 \
+    --apps_path /opt/frappe/apps
+```
+
+**Docker-Based Development (for team consistency):**
+```yaml
+# docker-compose.dev.yml
+version: '3.8'
+services:
+  frappe-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./apps:/home/frappe/apps
+      - ./sites:/home/frappe/sites
+      - ./config:/home/frappe/config
+    environment:
+      - FRAPPE_ENV=development
+      - FRAPPE_LOG_LEVEL=DEBUG
+    ports:
+      - "8000:8000"
+      - "9000:9000"
+```
+
+#### Understanding Bench's Internal Commands
+
+**What Happens When You Run `bench new-app`:**
+
+```python
+# Simplified version of bench's new-app logic
+def new_app(app_name, **kwargs):
+    # 1. Validate app name
+    if not re.match(r'^[a-zA-Z0-9_]+$', app_name):
+        raise ValueError("Invalid app name")
+    
+    # 2. Create app directory structure
+    app_path = create_app_structure(app_name)
+    
+    # 3. Generate standard files
+    create_standard_files(app_path, app_name)
+    
+    # 4. Create Python package structure
+    create_package_structure(app_path, app_name)
+    
+    # 5. Initialize Git repository
+    init_git_repo(app_path)
+    
+    # 6. Add to bench's apps registry
+    register_app_in_bench(app_name)
+    
+    return app_path
+```
+
+**What Happens When You Run `bench new-site`:**
+
+```python
+def new_site(site_name, **kwargs):
+    # 1. Generate unique database name
+    db_name = generate_db_name(site_name)
+    
+    # 2. Create database and user
+    create_database(db_name, site_name)
+    
+    # 3. Install Frappe framework
+    install_frappe_framework(site_name)
+    
+    # 4. Create site configuration
+    create_site_config(site_name, db_name)
+    
+    # 5. Set up default admin user
+    create_admin_user(site_name, kwargs.get('admin_password'))
+    
+    # 6. Initialize site data
+    initialize_site_data(site_name)
+    
+    return site_name
 ```
 
 ### 2.2 Bench Commands Deep Dive
 
-#### Essential Commands
+#### Understanding Command Categories
 
-**Initialization:**
+**Architecture Commands:**
 ```bash
+# These commands modify the bench structure
 bench init <bench-name>              # Initialize new bench
 bench new-app <app-name>             # Create new app
+bench get-app <app-url>              # Install app from repository
+bench remove-app <app-name>          # Remove app from bench
+```
+
+**Site Management Commands:**
+```bash
+# These commands operate on specific sites
 bench new-site <site-name>           # Create new site
 bench use <site-name>                # Switch active site
+bench --site <site-name> <command>    # Run command on specific site
+bench drop-site <site-name>          # Delete site
 ```
 
-**App Management:**
+**Development Commands:**
 ```bash
-bench install-app <app-name>         # Install app on all sites
-bench remove-app <app-name>          # Remove app
-bench update-app <app-name>          # Update specific app
-bench migrate                        # Run all pending migrations
-```
-
-**Site Management:**
-```bash
-bench --site <site-name> console     # Open Python console
-bench --site <site-name> migrate     # Migrate specific site
-bench --site <site-name> reinstall   # Reinstall site
-bench --site <site-name> backup      # Backup site
-```
-
-**Development:**
-```bash
-bench start                          # Start development server
-bench restart                        # Restart services
-bench doctor                         # Check system health
+# These commands manage the development server
+bench start                          # Start all services
+bench restart                        # Restart all services
+bench stop                           # Stop all services
 bench --site <site-name> watch       # Watch for file changes
 ```
 
-#### Advanced Commands
+#### Advanced Command Usage
 
-**Version Control:**
+**Performance-Optimized App Development:**
 ```bash
-bench update                         # Update all apps
-bench switch-to-branch <branch>      # Switch to specific branch
-bench merge-upstream                  # Merge upstream changes
+# Install app with specific branch and options
+bench get-app https://github.com/frappe/erpnext \
+    --branch version-15 \
+    --resolve-dependencies \
+    --verbose
+
+# Update with specific strategy
+bench update --patch --no-backup --skip-app-restore
+
+# Migrate with performance options
+bench --site dev.local migrate \
+    --skip-failing \
+    --rebuild-website
 ```
 
-**Configuration:**
+**Production-Grade Site Management:**
 ```bash
-bench config dns_multitenant on      # Enable multi-tenancy
-bench config serve_default_site on   # Serve default site
-bench config redis_socketio          # Configure Redis
+# Create site with production settings
+bench new-site prod.local \
+    --admin-password "$(openssl rand -base64 32)" \
+    --db-root-password "$(openssl rand -base64 32)" \
+    --mariadb-root-username frappe \
+    --mariadb-root-password "$(openssl rand -base64 32)"
+
+# Backup with compression
+bench --site prod.local backup \
+    --compress \
+    --with-files \
+    --backup-path /backups/$(date +%Y%m%d)
+
+# Restore with verification
+bench --site prod.local restore \
+    /backups/20231210_prod_local_20231210_120001.sql \
+    --with-migrate
+```
+
+#### Understanding Command Internals
+
+**How `bench start` Works:**
+```python
+# Simplified version of bench start logic
+def start():
+    # 1. Check system requirements
+    check_system_requirements()
+    
+    # 2. Start Redis services
+    start_redis_services()
+    
+    # 3. Start database service
+    start_database_service()
+    
+    # 4. Start web server
+    start_web_server()
+    
+    # 5. Start background workers
+    start_background_workers()
+    
+    # 6. Start SocketIO server
+    start_socketio_server()
+    
+    # 7. Verify all services are running
+    verify_services_health()
+```
+
+**How `bench migrate` Works:**
+```python
+def migrate(site=None, app=None):
+    # 1. Get list of pending migrations
+    migrations = get_pending_migrations(site, app)
+    
+    # 2. Sort migrations by dependencies
+    sorted_migrations = sort_by_dependencies(migrations)
+    
+    # 3. Execute migrations in order
+    for migration in sorted_migrations:
+        execute_migration(migration, site)
+        
+        # 4. Update migration status
+        update_migration_status(migration, site)
+    
+    # 5. Rebuild assets if needed
+    if assets_need_rebuild():
+        rebuild_assets()
+```
+
+#### Troubleshooting with Bench Commands
+
+**Debug Mode for Commands:**
+```bash
+# Enable verbose output
+bench --verbose start
+
+# Enable debug logging
+bench --debug migrate
+
+# Check what commands are available
+bench --help
+
+# Get detailed error information
+bench --traceback new-site test.local
+```
+
+**Performance Analysis:**
+```bash
+# Time command execution
+time bench --site dev.local migrate
+
+# Monitor resource usage during command
+bench --site dev.local start &
+bench --site dev.local doctor
+```
+
+#### Custom Bench Commands
+
+**Creating Custom Bench Commands:**
+```python
+# In your app's hooks.py
+def after_app_install(app_name):
+    """Custom command run after app installation"""
+    if app_name == "my_custom_app":
+        # Run custom setup
+        setup_custom_features()
+
+# Create custom bench command
+@frappe.whitelist()
+def custom_bench_command():
+    """Custom bench command accessible via API"""
+    return {
+        "status": "success",
+        "message": "Custom bench command executed"
+    }
+```
+
+**Extending Bench Functionality:**
+```bash
+# Create custom bench script
+cat > custom_bench.sh << 'EOF'
+#!/bin/bash
+# Custom bench operations
+
+case "$1" in
+    "setup-dev")
+        bench new-site dev.local --admin-password admin
+        bench --site dev.local install-app erpnext
+        bench --site dev.local set-config developer_mode 1
+        ;;
+    "setup-test")
+        bench new-site test.local --admin-password admin
+        bench --site test.local install-app erpnext
+        bench --site test.local set-config developer_mode 0
+        ;;
+    *)
+        echo "Usage: $0 {setup-dev|setup-test}"
+        exit 1
+        ;;
+esac
+EOF
+
+chmod +x custom_bench.sh
+./custom_bench.sh setup-dev
 ```
 
 ### 2.3 Understanding Bench Directory Structure
