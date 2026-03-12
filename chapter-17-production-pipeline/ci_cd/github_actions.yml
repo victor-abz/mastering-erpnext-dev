@@ -1,0 +1,112 @@
+name: ERPNext CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      mariadb:
+        image: mariadb:10.6
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: test_frappe
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+      
+      redis:
+        image: redis:alpine
+        ports:
+          - 6379:6379
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+    
+    - name: Install dependencies
+      run: |
+        pip install frappe-bench
+        npm install -g yarn
+    
+    - name: Initialize bench
+      run: |
+        bench init frappe-bench --skip-redis-config-generation --frappe-branch version-15
+        cd frappe-bench
+    
+    - name: Create test site
+      run: |
+        cd frappe-bench
+        bench new-site test.local --mariadb-root-password root --admin-password admin --no-mariadb-socket
+        bench --site test.local install-app erpnext
+    
+    - name: Install custom app
+      run: |
+        cd frappe-bench
+        bench get-app $GITHUB_WORKSPACE
+        bench --site test.local install-app asset_management_app
+    
+    - name: Run tests
+      run: |
+        cd frappe-bench
+        bench --site test.local run-tests --app asset_management_app --coverage
+    
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./frappe-bench/sites/coverage.xml
+
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install linting tools
+      run: |
+        pip install flake8 black pylint
+    
+    - name: Run flake8
+      run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+    
+    - name: Run black
+      run: black --check .
+    
+    - name: Run pylint
+      run: pylint **/*.py --disable=all --enable=E,F
+
+  deploy:
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Deploy to production
+      env:
+        DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+      run: |
+        echo "$DEPLOY_KEY" > deploy_key
+        chmod 600 deploy_key
+        ssh -i deploy_key -o StrictHostKeyChecking=no $PRODUCTION_HOST 'cd /home/frappe/frappe-bench && bench update --pull && bench migrate && bench restart'
