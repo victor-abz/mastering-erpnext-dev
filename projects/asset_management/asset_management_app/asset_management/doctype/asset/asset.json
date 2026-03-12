@@ -1,0 +1,182 @@
+{
+ "actions": [],
+ "creation": "2024-01-01 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "asset_name",
+  "asset_category",
+  "item_code",
+  "column_break_1",
+  "status",
+  "location",
+  "custodian",
+  "section_break_2",
+  "purchase_date",
+  "purchase_amount",
+  "supplier",
+  "column_break_3",
+  "available_from_date",
+  "current_value",
+  "accumulated_depreciation",
+  "section_break_4",
+  "depreciation_method",
+  "useful_life",
+  "column_break_5",
+  "salvage_value",
+  "depreciation_rate"
+ ],
+ "fields": [
+  {
+   "fieldname": "asset_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Asset Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "asset_category",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Asset Category",
+   "options": "Asset Category",
+   "reqd": 1
+  },
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "label": "Item Code",
+   "options": "Item"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Available\nIn Use\nUnder Maintenance\nScrapped",
+   "default": "Available"
+  },
+  {
+   "fieldname": "location",
+   "fieldtype": "Link",
+   "label": "Location",
+   "options": "Location"
+  },
+  {
+   "fieldname": "custodian",
+   "fieldtype": "Link",
+   "label": "Custodian",
+   "options": "Employee"
+  },
+  {
+   "fieldname": "section_break_2",
+   "fieldtype": "Section Break",
+   "label": "Purchase Details"
+  },
+  {
+   "fieldname": "purchase_date",
+   "fieldtype": "Date",
+   "label": "Purchase Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "purchase_amount",
+   "fieldtype": "Currency",
+   "label": "Purchase Amount",
+   "reqd": 1
+  },
+  {
+   "fieldname": "supplier",
+   "fieldtype": "Link",
+   "label": "Supplier",
+   "options": "Supplier"
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "available_from_date",
+   "fieldtype": "Date",
+   "label": "Available From Date"
+  },
+  {
+   "fieldname": "current_value",
+   "fieldtype": "Currency",
+   "label": "Current Value",
+   "read_only": 1
+  },
+  {
+   "fieldname": "accumulated_depreciation",
+   "fieldtype": "Currency",
+   "label": "Accumulated Depreciation",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_4",
+   "fieldtype": "Section Break",
+   "label": "Depreciation"
+  },
+  {
+   "fieldname": "depreciation_method",
+   "fieldtype": "Select",
+   "label": "Depreciation Method",
+   "options": "Straight Line\nWritten Down Value\nManual"
+  },
+  {
+   "fieldname": "useful_life",
+   "fieldtype": "Int",
+   "label": "Useful Life (Years)"
+  },
+  {
+   "fieldname": "column_break_5",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "salvage_value",
+   "fieldtype": "Currency",
+   "label": "Salvage Value"
+  },
+  {
+   "fieldname": "depreciation_rate",
+   "fieldtype": "Percent",
+   "label": "Depreciation Rate"
+  }
+ ],
+ "modified": "2024-01-01 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Asset Management",
+ "name": "Asset",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Asset Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Asset User",
+   "share": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

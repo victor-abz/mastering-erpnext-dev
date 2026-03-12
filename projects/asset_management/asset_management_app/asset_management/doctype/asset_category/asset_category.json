@@ -1,0 +1,131 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:category_name",
+ "creation": "2026-03-12 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "category_name",
+  "description",
+  "column_break_3",
+  "parent_category",
+  "is_group",
+  "section_break_6",
+  "depreciation_method",
+  "useful_life",
+  "column_break_9",
+  "enable_maintenance",
+  "maintenance_frequency",
+  "section_break_12",
+  "total_assets",
+  "total_value"
+ ],
+ "fields": [
+  {
+   "fieldname": "category_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Category Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "parent_category",
+   "fieldtype": "Link",
+   "label": "Parent Category",
+   "options": "Asset Category"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_group",
+   "fieldtype": "Check",
+   "label": "Is Group"
+  },
+  {
+   "fieldname": "section_break_6",
+   "fieldtype": "Section Break",
+   "label": "Depreciation Settings"
+  },
+  {
+   "fieldname": "depreciation_method",
+   "fieldtype": "Select",
+   "label": "Depreciation Method",
+   "options": "\nStraight Line\nDouble Declining Balance\nWritten Down Value"
+  },
+  {
+   "fieldname": "useful_life",
+   "fieldtype": "Int",
+   "label": "Useful Life (Years)"
+  },
+  {
+   "fieldname": "column_break_9",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_maintenance",
+   "fieldtype": "Check",
+   "label": "Enable Maintenance"
+  },
+  {
+   "depends_on": "enable_maintenance",
+   "fieldname": "maintenance_frequency",
+   "fieldtype": "Select",
+   "label": "Maintenance Frequency",
+   "options": "\nMonthly\nQuarterly\nHalf-Yearly\nYearly"
+  },
+  {
+   "fieldname": "section_break_12",
+   "fieldtype": "Section Break",
+   "label": "Statistics"
+  },
+  {
+   "fieldname": "total_assets",
+   "fieldtype": "Int",
+   "label": "Total Assets",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_value",
+   "fieldtype": "Currency",
+   "label": "Total Value",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-03-12 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Asset Management",
+ "name": "Asset Category",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Asset Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

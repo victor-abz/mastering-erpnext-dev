@@ -1,0 +1,138 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-03-12 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "asset",
+  "asset_name",
+  "column_break_4",
+  "maintenance_date",
+  "next_maintenance_date",
+  "section_break_7",
+  "maintenance_type",
+  "maintenance_status",
+  "column_break_10",
+  "performed_by",
+  "cost",
+  "section_break_13",
+  "description",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "MAINT-.YYYY.-"
+  },
+  {
+   "fieldname": "asset",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Asset",
+   "options": "Asset",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "asset.asset_name",
+   "fieldname": "asset_name",
+   "fieldtype": "Data",
+   "label": "Asset Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_4",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Today",
+   "fieldname": "maintenance_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Maintenance Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "next_maintenance_date",
+   "fieldtype": "Date",
+   "label": "Next Maintenance Date"
+  },
+  {
+   "fieldname": "section_break_7",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "maintenance_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Maintenance Type",
+   "options": "\nPreventive\nCorrective\nPredictive\nEmergency",
+   "reqd": 1
+  },
+  {
+   "default": "Scheduled",
+   "fieldname": "maintenance_status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Scheduled\nIn Progress\nCompleted\nCancelled"
+  },
+  {
+   "fieldname": "column_break_10",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "performed_by",
+   "fieldtype": "Link",
+   "label": "Performed By",
+   "options": "User"
+  },
+  {
+   "fieldname": "cost",
+   "fieldtype": "Currency",
+   "label": "Cost"
+  },
+  {
+   "fieldname": "section_break_13",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "links": [],
+ "modified": "2026-03-12 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Asset Management",
+ "name": "Asset Maintenance",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Asset Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
