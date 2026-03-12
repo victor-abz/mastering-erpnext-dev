@@ -1,0 +1,60 @@
+{
+  "doctype": "Asset",
+  "permissions": [
+    {
+      "role": "Asset Manager",
+      "permlevel": 0,
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "submit": 1,
+      "cancel": 1,
+      "amend": 1,
+      "report": 1,
+      "export": 1,
+      "import": 1,
+      "print": 1,
+      "email": 1,
+      "share": 1,
+      "if_owner": 0
+    },
+    {
+      "role": "Asset User",
+      "permlevel": 0,
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 0,
+      "submit": 0,
+      "cancel": 0,
+      "report": 1,
+      "export": 1,
+      "print": 1,
+      "email": 1,
+      "if_owner": 1
+    },
+    {
+      "role": "Employee",
+      "permlevel": 0,
+      "read": 1,
+      "write": 0,
+      "create": 0,
+      "delete": 0,
+      "report": 1,
+      "if_owner": 0,
+      "match": "custodian"
+    }
+  ],
+  "user_permissions": [
+    {
+      "doctype": "Asset",
+      "apply_to_all_doctypes": 0,
+      "applicable_for": "Employee",
+      "apply_user_permissions": {
+        "Department": 1,
+        "Location": 1
+      }
+    }
+  ]
+}
