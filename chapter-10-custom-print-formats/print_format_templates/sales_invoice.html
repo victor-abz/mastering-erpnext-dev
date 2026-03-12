@@ -1,0 +1,106 @@
+<!-- Professional Sales Invoice Print Format -->
+<!-- Chapter 10: Custom Print Formats -->
+
+{% set company = frappe.get_doc("Company", doc.company) %}
+
+<div class="invoice-container" style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
+	<!-- Header -->
+	<div class="header" style="border-bottom: 3px solid #2c3e50; padding-bottom: 20px; margin-bottom: 20px;">
+		<table style="width: 100%;">
+			<tr>
+				<td style="width: 50%;">
+					{% if company.company_logo %}
+					<img src="{{ company.company_logo }}" style="max-width: 150px;">
+					{% endif %}
+					<h2 style="margin: 10px 0;">{{ company.company_name }}</h2>
+					<p style="margin: 5px 0; color: #666;">
+						{{ company.address }}<br>
+						Phone: {{ company.phone }}<br>
+						Email: {{ company.email }}
+					</p>
+				</td>
+				<td style="width: 50%; text-align: right; vertical-align: top;">
+					<h1 style="margin: 0; color: #2c3e50;">INVOICE</h1>
+					<p style="margin: 10px 0;">
+						<strong>Invoice #:</strong> {{ doc.name }}<br>
+						<strong>Date:</strong> {{ frappe.utils.formatdate(doc.posting_date) }}<br>
+						<strong>Due Date:</strong> {{ frappe.utils.formatdate(doc.due_date) }}
+					</p>
+				</td>
+			</tr>
+		</table>
+	</div>
+	
+	<!-- Bill To -->
+	<div class="bill-to" style="margin-bottom: 30px;">
+		<h3 style="margin: 0 0 10px 0; color: #2c3e50;">Bill To:</h3>
+		<p style="margin: 0;">
+			<strong>{{ doc.customer_name }}</strong><br>
+			{{ doc.customer_address }}<br>
+			{% if doc.tax_id %}Tax ID: {{ doc.tax_id }}<br>{% endif %}
+		</p>
+	</div>
+	
+	<!-- Items Table -->
+	<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+		<thead>
+			<tr style="background-color: #2c3e50; color: white;">
+				<th style="padding: 10px; text-align: left; border: 1px solid #ddd;">#</th>
+				<th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Item</th>
+				<th style="padding: 10px; text-align: center; border: 1px solid #ddd;">Qty</th>
+				<th style="padding: 10px; text-align: right; border: 1px solid #ddd;">Rate</th>
+				<th style="padding: 10px; text-align: right; border: 1px solid #ddd;">Amount</th>
+			</tr>
+		</thead>
+		<tbody>
+			{% for item in doc.items %}
+			<tr>
+				<td style="padding: 10px; border: 1px solid #ddd;">{{ item.idx }}</td>
+				<td style="padding: 10px; border: 1px solid #ddd;">
+					<strong>{{ item.item_name }}</strong><br>
+					<small style="color: #666;">{{ item.description }}</small>
+				</td>
+				<td style="padding: 10px; text-align: center; border: 1px solid #ddd;">{{ item.qty }}</td>
+				<td style="padding: 10px; text-align: right; border: 1px solid #ddd;">
+					{{ frappe.utils.fmt_money(item.rate, currency=doc.currency) }}
+				</td>
+				<td style="padding: 10px; text-align: right; border: 1px solid #ddd;">
+					{{ frappe.utils.fmt_money(item.amount, currency=doc.currency) }}
+				</td>
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+	
+	<!-- Totals -->
+	<div style="text-align: right; margin-bottom: 30px;">
+		<table style="margin-left: auto; width: 300px;">
+			<tr>
+				<td style="padding: 5px;"><strong>Subtotal:</strong></td>
+				<td style="padding: 5px; text-align: right;">
+					{{ frappe.utils.fmt_money(doc.total, currency=doc.currency) }}
+				</td>
+			</tr>
+			{% for tax in doc.taxes %}
+			<tr>
+				<td style="padding: 5px;">{{ tax.description }}:</td>
+				<td style="padding: 5px; text-align: right;">
+					{{ frappe.utils.fmt_money(tax.tax_amount, currency=doc.currency) }}
+				</td>
+			</tr>
+			{% endfor %}
+			<tr style="border-top: 2px solid #2c3e50;">
+				<td style="padding: 10px;"><strong>Grand Total:</strong></td>
+				<td style="padding: 10px; text-align: right; font-size: 18px;">
+					<strong>{{ frappe.utils.fmt_money(doc.grand_total, currency=doc.currency) }}</strong>
+				</td>
+			</tr>
+		</table>
+	</div>
+	
+	<!-- Footer -->
+	<div class="footer" style="border-top: 2px solid #2c3e50; padding-top: 20px; text-align: center; color: #666;">
+		<p>Thank you for your business!</p>
+		<p style="font-size: 12px;">{{ company.footer_text or "This is a computer generated invoice." }}</p>
+	</div>
+</div>

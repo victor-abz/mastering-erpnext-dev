@@ -1,0 +1,111 @@
+/* Custom Print Format Styles */
+/* Chapter 10: Custom Print Formats */
+
+/* Invoice Container */
+.invoice-container {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* Header Styles */
+.invoice-header {
+    border-bottom: 3px solid #2c3e50;
+    padding-bottom: 20px;
+    margin-bottom: 30px;
+}
+
+.company-logo {
+    max-width: 150px;
+    max-height: 80px;
+}
+
+.invoice-title {
+    font-size: 36px;
+    font-weight: bold;
+    color: #2c3e50;
+    margin: 0;
+}
+
+/* Customer Info */
+.bill-to {
+    background-color: #f8f9fa;
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 30px;
+}
+
+/* Items Table */
+.items-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 30px;
+}
+
+.items-table thead {
+    background-color: #2c3e50;
+    color: white;
+}
+
+.items-table th {
+    padding: 12px;
+    text-align: left;
+    font-weight: bold;
+}
+
+.items-table td {
+    padding: 10px;
+    border-bottom: 1px solid #ddd;
+}
+
+.items-table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+/* Totals Section */
+.totals-section {
+    text-align: right;
+    margin-bottom: 30px;
+}
+
+.totals-table {
+    margin-left: auto;
+    width: 350px;
+}
+
+.totals-table td {
+    padding: 8px;
+}
+
+.grand-total {
+    font-size: 20px;
+    font-weight: bold;
+    color: #2c3e50;
+    border-top: 2px solid #2c3e50;
+    padding-top: 10px;
+}
+
+/* Footer */
+.invoice-footer {
+    border-top: 2px solid #2c3e50;
+    padding-top: 20px;
+    text-align: center;
+    color: #666;
+    font-size: 12px;
+}
+
+/* Print-specific styles */
+@media print {
+    .invoice-container {
+        padding: 0;
+    }
+    
+    .no-print {
+        display: none;
+    }
+    
+    @page {
+        margin: 1cm;
+    }
+}

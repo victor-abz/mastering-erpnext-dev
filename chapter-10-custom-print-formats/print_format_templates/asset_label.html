@@ -1,0 +1,25 @@
+<!-- Asset Label Print Format -->
+<!-- Chapter 10: Custom Print Formats -->
+
+<div class="asset-label" style="width: 4in; height: 2in; border: 2px solid #333; padding: 10px; font-family: Arial;">
+	<div style="text-align: center; margin-bottom: 10px;">
+		<h3 style="margin: 0;">{{ doc.company }}</h3>
+		<p style="margin: 5px 0; font-size: 12px;">Asset Management</p>
+	</div>
+	
+	<div style="margin-bottom: 10px;">
+		<strong>Asset Code:</strong> {{ doc.name }}<br>
+		<strong>Asset Name:</strong> {{ doc.asset_name }}<br>
+		<strong>Category:</strong> {{ doc.asset_category }}
+	</div>
+	
+	<div style="text-align: center; margin-top: 10px;">
+		<!-- QR Code -->
+		<img src="/api/method/frappe.utils.print_format.get_qr_code?data={{ doc.name }}" 
+		     style="width: 80px; height: 80px;">
+	</div>
+	
+	<div style="font-size: 10px; margin-top: 10px; text-align: center;">
+		Purchase Date: {{ frappe.utils.formatdate(doc.purchase_date) }}
+	</div>
+</div>
