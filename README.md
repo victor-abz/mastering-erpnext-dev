@@ -4,17 +4,15 @@
 
 ![Completion](https://img.shields.io/badge/Completion-100%25-brightgreen)
 ![Files](https://img.shields.io/badge/Files-65-blue)
-![Lines of Code](https://img.shields.io/badge/Lines%20of%20Code-8100%2B-blue)
 ![Tests](https://img.shields.io/badge/Tests-6%20files-green)
 ![License](https://img.shields.io/badge/License-GPL-blue)
 
-A comprehensive technical guide for developers who want to master the Frappe Framework and ERPNext development. This book is **complete** with 17 chapters, 3 production-ready applications, 65 files, and 8,100+ lines of code.
+A comprehensive technical guide for developers who want to master the Frappe Framework and ERPNext development. 
 
 ## 🌟 Key Highlights
 
 - ✅ **17 Complete Chapters** - From environment setup to production deployment
 - ✅ **3 Production-Ready Apps** - Asset Management, Production Planning, Vendor Portal
-- ✅ **65 Files** - 8,100+ lines of production code
 - ✅ **Comprehensive Testing** - Unit, integration, E2E, and performance tests (880+ lines)
 - ✅ **Complete CI/CD** - GitHub Actions pipeline with automated deployment
 - ✅ **Performance Benchmarks** - Established benchmarks for critical operations
@@ -29,7 +27,6 @@ This **complete and production-ready** book is your comprehensive guide to becom
 ### ✨ What Makes This Book Special
 
 - **100% Complete:** All 17 chapters with comprehensive content
-- **Production-Ready Code:** 65 files, 8,100+ lines of tested code
 - **3 Complete Applications:** Ready to install and deploy
 - **Comprehensive Testing:** Unit, integration, E2E, and performance tests
 - **Real-World Focus:** Not toy examples, but production applications
@@ -61,21 +58,21 @@ mastering-erpnext-dev/
 ├── chapter-04-advanced-doctypes/       ✅ 7 DocType designs
 ├── chapter-05-controller-deep-dive/    ✅ 15+ controller examples
 ├── chapter-06-mastering-orm/           ✅ 15+ ORM examples
-├── chapter-07-client-side-mastery/     ✅ 5 JS files (950+ lines)
-├── chapter-08-server-script-hooks/     ✅ 3 Python files (500+ lines)
+├── chapter-07-client-side-mastery/     ✅ 5 JS files 
+├── chapter-08-server-script-hooks/     ✅ 3 Python files 
 ├── chapter-09-permissions-system/      ✅ Permission examples
 ├── chapter-10-custom-print-formats/    ✅ 3 templates (HTML + CSS)
 ├── chapter-11-ecommerce-platform/      ✅ Complete
 ├── chapter-12-crm-system/              ✅ Complete
 ├── chapter-13-project-management/      ✅ Complete
 ├── chapter-14-debugging/               ✅ Complete
-├── chapter-15-automated-testing/       ✅ 6 test files (880+ lines)
+├── chapter-15-automated-testing/       ✅ 6 test files 
 ├── chapter-16-performance-tuning/      ✅ Complete with benchmarks
 ├── chapter-17-production-pipeline/     ✅ CI/CD + deployment
 ├── projects/                # Complete applications (Chapters 11-13)
-│   ├── asset_management/    # ✅ 20+ files, 1,200+ lines
-│   ├── production_planning/ # ✅ 10+ files, 600+ lines
-│   └── vendor_portal/       # ✅ 12+ files, 500+ lines
+│   ├── asset_management/    # ✅ 20+ files
+│   ├── production_planning/ # ✅ 10+ files
+│   └── vendor_portal/       # ✅ 12+ files
 ├── resources/               # Additional reference materials
 ├── QUICK_START_GUIDE.md    # Get started in 5 minutes
 ├── PROJECT_COMPLETION_SUMMARY.md  # Detailed completion report
@@ -142,7 +139,7 @@ Complete enterprise-grade asset tracking system with:
 - Maintenance scheduling with email notifications
 - Utilization reports with date filtering
 - Scheduled tasks (daily, weekly, monthly)
-- **20+ files | 1,200+ lines | Production-ready**
+
 
 ### ✅ Production Planning Tool (Chapter 12) - COMPLETE
 Advanced manufacturing planning system with:
@@ -153,7 +150,7 @@ Advanced manufacturing planning system with:
 - Material shortage detection
 - Capacity planning and analysis
 - Permission-based access control
-- **10+ files | 600+ lines | Production-ready**
+
 
 ### ✅ Vendor Portal (Chapter 13) - COMPLETE
 Full-featured REST API portal with:
@@ -164,21 +161,7 @@ Full-featured REST API portal with:
 - Secure API key/secret management
 - Vendor-specific data access control
 - Complete API documentation with curl examples
-- **12+ files | 500+ lines | Production-ready**
 
-## 📊 What You Get
-
-- **65 production-ready files** across three complete applications
-- **8,100+ lines of code** covering all Frappe development aspects
-- **5 JavaScript files** (950+ lines) for client-side development
-- **39 Python files** (5,300+ lines) for backend development
-- **6 comprehensive test files** (880+ lines) - unit, integration, E2E, performance
-- **Complete CI/CD pipeline** with GitHub Actions
-- **3 production-ready applications** ready to install
-- **API documentation** with curl examples
-- **Installation guides** for all apps
-- **Performance benchmarks** for critical operations
-- **Quick start guide** for 5-minute setup
 
 ## 🎓 Learning Outcomes
 
@@ -204,16 +187,6 @@ After completing this book, you will:
 - CI/CD pipeline configuration
 - Production deployment and monitoring
 
-## 📈 Project Statistics
-
-- **Total Files:** 65 production-ready files
-- **Total Lines:** 8,100+ lines of code
-- **Python Files:** 39 files (5,300+ lines)
-- **JavaScript Files:** 5 files (950+ lines)
-- **Test Files:** 6 files (880+ lines)
-- **JSON Definitions:** 10+ files (2,000+ lines)
-- **Documentation:** 12+ markdown files
-- **Completion:** 100% ✅
 
 ## 🚀 Quick Links
 
