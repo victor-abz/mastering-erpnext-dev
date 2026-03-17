@@ -459,15 +459,16 @@ class OptimizedDocumentLoader:
         table_name = f"tab{doctype}"
         field_list = fields or ['*']
         
-        # Build WHERE clause
-        where_clause = f"name IN ({','.join([f"'{name}'" for name in names])})"
+        # Build WHERE clause (SECURE: Using parameterized query)
+        placeholders = ', '.join(['%s'] * len(names))
+        where_clause = f"name IN ({placeholders})"
         
-        # Execute batch query
+        # Execute batch query (SECURE: Using parameterized query)
         documents = frappe.db.sql(f"""
             SELECT {', '.join(field_list)}
             FROM {table_name}
             WHERE {where_clause}
-        """, as_dict=True)
+        """, tuple(names), as_dict=True)
         
         # Cache each document
         for doc_data in documents:

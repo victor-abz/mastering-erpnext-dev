@@ -257,6 +257,38 @@ def daily_send_expiry_notifications():
     except Exception as e:
         frappe.log_error(f"Daily expiry notifications failed: {str(e)}")
 
+def send_contract_expiry_notification(customer, contracts):
+    """Send contract expiry notification to customer"""
+    try:
+        # Get customer email
+        customer_email = frappe.db.get_value("Customer", customer, "email_id")
+        if not customer_email:
+            frappe.logger().warning(f"No email found for customer {customer}")
+            return
+        
+        # Prepare email content
+        email_context = {
+            "customer_name": frappe.db.get_value("Customer", customer, "customer_name"),
+            "contracts": contracts,
+            "total_contracts": len(contracts)
+        }
+        
+        # Send email
+        frappe.sendmail(
+            recipients=[customer_email],
+            subject="Important: Your Contracts Are Expiring Soon",
+            template="contract_expiry_notification",
+            args=email_context,
+            reference_doctype="Customer",
+            reference_name=customer
+        )
+        
+        frappe.logger().info(f"Sent expiry notification to {customer}")
+        
+    except Exception as e:
+        frappe.log_error(f"Failed to send notification to {customer}: {str(e)}")
+        # Continue with other customers even if one fails
+
 @frappe.whitelist()
 def weekly_generate_performance_reports():
     """

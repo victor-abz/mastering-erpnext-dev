@@ -112,43 +112,75 @@ def get_items_for_production_plan(sales_orders):
 
 @frappe.whitelist()
 def explode_bom(production_plan):
-	"""Explode BOM to get raw material requirements"""
+	"""Explode BOM to get raw material requirements - Optimized version"""
 	doc = frappe.get_doc('Production Plan', production_plan)
 	raw_materials = {}
 	
+	# Collect all item codes first
+	item_codes = [item.item_code for item in doc.po_items]
+	
+	if not item_codes:
+		return []
+	
+	# Get all BOMs in one query
+	boms = frappe.db.sql("""
+		SELECT DISTINCT 
+			b.name as bom_name,
+			b.item as item_code
+		FROM `tabBOM` b
+		WHERE b.item IN %(item_codes)s
+		AND b.is_active = 1
+		AND b.is_default = 1
+	""", {'item_codes': item_codes}, as_dict=1)
+	
+	if not boms:
+		return []
+	
+	# Create mapping of item_code -> bom_name
+	bom_map = {bom.item_code: bom.bom_name for bom in boms}
+	bom_names = list(bom_map.values())
+	
+	# Get all BOM items in one query
+	bom_items = frappe.db.sql("""
+		SELECT 
+			bi.parent as bom_name,
+			bi.item_code,
+			bi.item_name,
+			bi.qty,
+			bi.uom,
+			bi.stock_uom
+		FROM `tabBOM Item` bi
+		WHERE bi.parent IN %(bom_names)s
+	""", {'bom_names': bom_names}, as_dict=1)
+	
+	# Create mapping of bom_name -> bom_items
+	bom_items_map = {}
+	for bom_item in bom_items:
+		if bom_item.bom_name not in bom_items_map:
+			bom_items_map[bom_item.bom_name] = []
+		bom_items_map[bom_item.bom_name].append(bom_item)
+	
+	# Calculate raw material requirements
 	for item in doc.po_items:
-		# Get BOM for item
-		bom = frappe.db.get_value('BOM', {
-			'item': item.item_code,
-			'is_active': 1,
-			'is_default': 1
-		}, 'name')
+		bom_name = bom_map.get(item.item_code)
+		if not bom_name:
+			continue
 		
-		if bom:
-			# Get BOM items
-			bom_items = frappe.db.sql("""
-				SELECT 
-					item_code,
-					item_name,
-					qty,
-					uom,
-					stock_uom
-				FROM `tabBOM Item`
-				WHERE parent = %(bom)s
-			""", {'bom': bom}, as_dict=1)
+		item_bom_items = bom_items_map.get(bom_name, [])
+		
+		for bom_item in item_bom_items:
+			required_qty = flt(bom_item.qty) * flt(item.planned_qty)
 			
-			for bom_item in bom_items:
-				required_qty = flt(bom_item.qty) * flt(item.planned_qty)
-				
-				if bom_item.item_code in raw_materials:
-					raw_materials[bom_item.item_code]['required_qty'] += required_qty
-				else:
-					raw_materials[bom_item.item_code] = {
-						'item_code': bom_item.item_code,
-						'item_name': bom_item.item_name,
-						'required_qty': required_qty,
-						'uom': bom_item.uom
-					}
+			if bom_item.item_code in raw_materials:
+				raw_materials[bom_item.item_code]['required_qty'] += required_qty
+			else:
+				raw_materials[bom_item.item_code] = {
+					'item_code': bom_item.item_code,
+					'item_name': bom_item.item_name,
+					'required_qty': required_qty,
+					'uom': bom_item.uom,
+					'stock_uom': bom_item.stock_uom
+				}
 	
 	return list(raw_materials.values())
 

@@ -17,9 +17,37 @@ class Asset(Document):
 		self.validate_dates()
 		self.validate_amounts()
 		self.validate_category()
+		self.validate_duplicate_asset()
 		self.set_asset_name()
 	
-	def validate_dates(self):
+	def validate_duplicate_asset(self):
+		"""Validate that asset doesn't already exist"""
+		if not self.item_code:
+			return
+		
+		# Check for duplicate asset with same item code
+		existing_asset = frappe.db.exists("Asset", {
+			"item_code": self.item_code,
+			"docstatus": ["!=", 2]  # Exclude cancelled assets
+		})
+		
+		if existing_asset and existing_asset != self.name:
+			frappe.throw(_("Asset with Item Code {0} already exists: {1}").format(
+				self.item_code, existing_asset
+			), frappe.DuplicateEntryError)
+		
+		# Check for duplicate asset name if manually set
+		if self.asset_name and self.name:
+			existing_by_name = frappe.db.exists("Asset", {
+				"asset_name": self.asset_name,
+				"docstatus": ["!=", 2]
+			})
+			
+			if existing_by_name and existing_by_name != self.name:
+				frappe.throw(_("Asset with name '{0}' already exists: {1}").format(
+					self.asset_name, existing_by_name
+				), frappe.DuplicateEntryError)
+		def validate_dates(self):
 		"""Validate date fields"""
 		if self.purchase_date and getdate(self.purchase_date) > getdate(today()):
 			frappe.throw(_("Purchase date cannot be in the future"))
