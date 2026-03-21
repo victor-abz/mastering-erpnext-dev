@@ -2247,3 +2247,81 @@ Mastering custom print formats is essential for professional document generation
 ---
 
 **Next Chapter**: E-commerce platform development with complete online store implementation.
+
+
+---
+
+## Addendum: Server-Side PDF Generation & Default Print Format
+
+### A.1 Server-Side PDF with `frappe.render_template()`
+
+Use `frappe.render_template()` to render a Jinja2 template string or file path, then pass the result to `frappe.utils.pdf.get_pdf()` to produce a PDF binary.
+
+```python
+# your_app/utils/pdf_utils.py
+import frappe
+from frappe.utils.pdf import get_pdf
+
+@frappe.whitelist()
+def generate_asset_pdf(asset_name: str) -> dict:
+    """
+    Render an Asset document to PDF server-side and attach it to the record.
+    Returns the file URL.
+    """
+    doc = frappe.get_doc("Asset", asset_name)
+
+    # Render Jinja2 template — can be a template string or a path like
+    # "asset_management/templates/asset_label.html"
+    html = frappe.render_template(
+        "asset_management/templates/asset_label.html",
+        {"doc": doc},
+    )
+
+    # get_pdf() wraps wkhtmltopdf / WeasyPrint depending on site config
+    pdf_bytes = get_pdf(html, options={"page-size": "A4", "orientation": "Portrait"})
+
+    # Save as a private file attached to the document
+    file_doc = frappe.get_doc(
+        {
+            "doctype": "File",
+            "file_name": f"{asset_name}.pdf",
+            "attached_to_doctype": "Asset",
+            "attached_to_name": asset_name,
+            "is_private": 1,
+            "content": pdf_bytes,
+        }
+    )
+    file_doc.save(ignore_permissions=True)
+
+    return {"file_url": file_doc.file_url}
+```
+
+Key points:
+- `frappe.render_template()` accepts either a template string or a path relative to any installed app's templates directory.
+- `get_pdf()` respects the `pdf_engine` key in `site_config.json` (`wkhtmltopdf` by default, `weasyprint` if set).
+- Always attach generated PDFs as `File` documents so they appear in the document's attachment list.
+
+### A.2 Setting a Default Print Format via `hooks.py`
+
+Register a default print format for a DocType so it is pre-selected whenever a user opens the print dialog.
+
+```python
+# your_app/hooks.py
+
+# Map DocType → Print Format name (must exist in the database / fixtures)
+default_print_format = {
+    "Asset": "Asset Label",
+    "Sales Invoice": "Custom Sales Invoice",
+}
+```
+
+Frappe reads `default_print_format` from every installed app's `hooks.py` and merges them. The value must match the `name` field of an existing **Print Format** document. Export the Print Format as a fixture so it travels with the app:
+
+```python
+# hooks.py — also export the print format as a fixture
+fixtures = [
+    {"dt": "Print Format", "filters": [["doc_type", "in", ["Asset", "Sales Invoice"]]]},
+]
+```
+
+Then run `bench export-fixtures` to write the JSON files into your app's `fixtures/` directory.

@@ -928,3 +928,76 @@ Advanced DocType design is fundamental to building robust ERPNext applications:
 ---
 
 **Next Chapter**: Deep dive into controller methods and document lifecycle.
+
+
+---
+
+## 📌 Addendum: fetch_from, Child DocTypes, and set_fetch_from_value
+
+### fetch_from — Auto-populate Fields from Linked Documents
+
+`fetch_from` lets a field automatically copy a value from a linked (Link) field's target document.  This avoids a round-trip `frappe.call` in client scripts for simple lookups.
+
+```json
+{
+  "fieldname": "customer_group",
+  "fieldtype": "Data",
+  "label": "Customer Group",
+  "fetch_from": "customer.customer_group",
+  "read_only": 1,
+  "in_list_view": 0
+}
+```
+
+- `fetch_from` format: `<link_fieldname>.<target_fieldname>`
+- The field is populated automatically when the Link field changes (client-side) and on `validate` (server-side).
+- Mark the field `read_only: 1` so users cannot override the fetched value.
+
+**Server-side equivalent — `set_fetch_from_value`:**
+
+```python
+# In your controller's validate() or before_save():
+def validate(self):
+    # Manually trigger fetch_from logic for all fields
+    self.set_fetch_from_value()
+
+    # Or fetch a specific value explicitly:
+    if self.customer:
+        self.customer_group = frappe.db.get_value('Customer', self.customer, 'customer_group')
+```
+
+`set_fetch_from_value()` is called automatically by Frappe during `validate`, but calling it explicitly is useful when you need the fetched value available earlier in the lifecycle.
+
+### Child DocTypes (Table Fields)
+
+A **Child DocType** (`istable: 1`) represents a one-to-many relationship — the rows of a child table belong to a single parent document.
+
+**Key design rules:**
+- Set `istable: 1` in the DocType definition.
+- The child table must have `parent`, `parenttype`, and `parentfield` system fields (added automatically by Frappe).
+- Reference the child DocType from the parent using a `Table` field: `"fieldtype": "Table", "options": "My Child DocType"`.
+- Child DocType permissions are inherited from the parent — you do not set separate permissions on child tables.
+- Use `permlevel` on child fields to restrict access to sensitive columns (e.g. cost fields visible only to managers).
+
+```python
+# Accessing child table rows in a controller
+class SalesOrder(Document):
+    def validate(self):
+        for item in self.get('items', []):
+            if item.qty <= 0:
+                frappe.throw(f"Quantity must be > 0 for item {item.item_code}")
+            item.amount = item.qty * item.rate
+
+    def calculate_total(self):
+        self.total = sum(item.amount for item in self.get('items', []))
+```
+
+**Bulk-inserting child rows efficiently:**
+
+```python
+# Avoid calling doc.save() in a loop — set all rows then save once
+doc = frappe.get_doc('Sales Order', 'SO-0001')
+for row_data in new_rows:
+    doc.append('items', row_data)
+doc.save()
+```

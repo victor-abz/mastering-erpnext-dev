@@ -21,40 +21,60 @@ class TestVendorPortalE2E(unittest.TestCase):
 	@classmethod
 	def create_test_vendor(cls):
 		"""Create test vendor with API credentials"""
-		if not frappe.db.exists("Vendor", "TEST-VENDOR-001"):
+		if not frappe.db.exists("Vendor", "Test Vendor"):
 			vendor = frappe.get_doc({
 				"doctype": "Vendor",
 				"vendor_name": "Test Vendor",
 				"api_key": "test_api_key_123",
 				"api_secret": "test_api_secret_456",
-				"webhook_url": "https://example.com/webhook"
+				"webhook_url": "https://example.com/webhook",
+				"status": "Active"
 			})
 			vendor.insert(ignore_permissions=True)
+			frappe.db.commit()
 			cls.vendor_name = vendor.name
 		else:
-			cls.vendor_name = "TEST-VENDOR-001"
-	
+			cls.vendor_name = frappe.db.get_value("Vendor", {"vendor_name": "Test Vendor"}, "name") or "Test Vendor"
+
 	@classmethod
 	def create_test_purchase_order(cls):
 		"""Create test purchase order"""
-		if not frappe.db.exists("Purchase Order", {"supplier": cls.vendor_name}):
-			po = frappe.get_doc({
-				"doctype": "Purchase Order",
-				"supplier": cls.vendor_name,
-				"company": frappe.defaults.get_defaults().get("company"),
-				"transaction_date": today(),
-				"schedule_date": today()
+		existing = frappe.db.get_value("Purchase Order", {"supplier": cls.vendor_name}, "name")
+		if existing:
+			cls.po_name = existing
+			return
+
+		# Ensure a supplier exists with the same name as our vendor
+		if not frappe.db.exists("Supplier", cls.vendor_name):
+			supplier = frappe.get_doc({
+				"doctype": "Supplier",
+				"supplier_name": cls.vendor_name,
+				"supplier_group": "All Supplier Groups",
+				"supplier_type": "Company"
 			})
-			
-			po.append("items", {
-				"item_code": "TEST-ITEM-001",
-				"qty": 10,
-				"rate": 100
-			})
-			
-			po.insert(ignore_permissions=True)
-			po.submit()
-			cls.po_name = po.name
+			supplier.insert(ignore_permissions=True)
+			frappe.db.commit()
+
+		company = frappe.defaults.get_defaults().get("company")
+		po = frappe.get_doc({
+			"doctype": "Purchase Order",
+			"supplier": cls.vendor_name,
+			"company": company,
+			"transaction_date": today(),
+			"schedule_date": today(),
+			"currency": "USD"
+		})
+		po.append("items", {
+			"item_code": "PERF-TEST-ITEM",
+			"qty": 10,
+			"rate": 100,
+			"schedule_date": today(),
+			"uom": "Nos"
+		})
+		po.insert(ignore_permissions=True, ignore_links=True)
+		po.submit()
+		frappe.db.commit()
+		cls.po_name = po.name
 	
 	def tearDown(self):
 		"""Clean up after each test"""
@@ -98,11 +118,11 @@ class TestVendorPortalE2E(unittest.TestCase):
 			api_secret="test_api_secret_456"
 		)
 		
-		# Store token in cache
+		# Store token in cache (v16: setex(key, ttl, value))
 		frappe.cache().setex(
 			f"vendor_token:{auth_result['token']}", 
-			self.vendor_name, 
-			86400
+			86400,
+			self.vendor_name
 		)
 		
 		# Get purchase orders
@@ -126,8 +146,8 @@ class TestVendorPortalE2E(unittest.TestCase):
 		# Store token
 		frappe.cache().setex(
 			f"vendor_token:{auth_result['token']}", 
-			self.vendor_name, 
-			86400
+			86400,
+			self.vendor_name
 		)
 		
 		# Set request header for authentication
@@ -160,8 +180,8 @@ class TestVendorPortalE2E(unittest.TestCase):
 		# Store token
 		frappe.cache().setex(
 			f"vendor_token:{auth_result['token']}", 
-			self.vendor_name, 
-			86400
+			86400,
+			self.vendor_name
 		)
 		
 		# Set request header
@@ -219,8 +239,8 @@ class TestVendorPortalE2E(unittest.TestCase):
 		# Store token for vendor 2
 		frappe.cache().setex(
 			f"vendor_token:{auth_result['token']}", 
-			"TEST-VENDOR-002", 
-			86400
+			86400,
+			"TEST-VENDOR-002"
 		)
 		
 		# Set request header

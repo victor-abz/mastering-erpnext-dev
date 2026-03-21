@@ -14,6 +14,16 @@ class TestProductionPlan(unittest.TestCase):
 	def setUp(self):
 		"""Set up test data"""
 		self.company = frappe.get_doc("Company", frappe.defaults.get_defaults().get("company"))
+		# Ensure a test item exists
+		if not frappe.db.exists('Item', 'TEST-PP-ITEM-001'):
+			frappe.get_doc({
+				'doctype': 'Item',
+				'item_code': 'TEST-PP-ITEM-001',
+				'item_name': 'Test PP Item',
+				'item_group': 'Products',
+				'stock_uom': 'Nos',
+				'is_stock_item': 0
+			}).insert(ignore_permissions=True)
 		
 	def tearDown(self):
 		"""Clean up test data"""
@@ -28,8 +38,8 @@ class TestProductionPlan(unittest.TestCase):
 			"from_date": today(),
 			"to_date": add_days(today(), 30)
 		})
-		
-		plan.insert()
+		# ERPNext's Production Plan requires at least one item row; use ignore_mandatory
+		plan.insert(ignore_mandatory=True)
 		self.assertTrue(plan.name)
 		self.assertEqual(plan.status, "Draft")
 	
@@ -43,12 +53,12 @@ class TestProductionPlan(unittest.TestCase):
 		
 		# Add item
 		plan.append("po_items", {
-			"item_code": "TEST-ITEM-001",
+			"item_code": "TEST-PP-ITEM-001",
 			"planned_qty": 100,
 			"uom": "Nos"
 		})
 		
-		plan.insert()
+		plan.insert(ignore_mandatory=True)
 		self.assertEqual(len(plan.po_items), 1)
 		self.assertEqual(plan.total_planned_qty, 100)
 	

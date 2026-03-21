@@ -1014,3 +1014,61 @@ Understanding app anatomy is crucial for effective Frappe development:
 ---
 
 **Next Chapter**: Advanced DocType design and metadata management.
+
+
+---
+
+## 📌 Addendum: pyproject.toml in Frappe v15 & the __init__.py Requirement
+
+### pyproject.toml Transition (Frappe v15)
+
+Frappe v15 moves away from `setup.py` toward the modern Python packaging standard using `pyproject.toml`.  If you scaffold a new app with `bench new-app` on v15 you will get a `pyproject.toml` instead of `setup.py`.
+
+```toml
+# pyproject.toml (Frappe v15 style)
+[build-system]
+requires = ["flit_core>=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "my_custom_app"
+version = "1.0.0"
+description = "A custom ERPNext application"
+requires-python = ">=3.10"
+dependencies = [
+    "frappe",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/my_custom_app"
+```
+
+If you are maintaining a v14 app and want to stay compatible with v15, add a `pyproject.toml` alongside your existing `setup.py` — bench will prefer `pyproject.toml` when present.
+
+### __init__.py is Required in Every Package Directory
+
+Every directory that Python needs to treat as a package **must** contain an `__init__.py` file, even if it is empty.  Missing `__init__.py` files are a common source of `ModuleNotFoundError` in Frappe apps.
+
+```
+my_custom_app/
+├── my_custom_app/
+│   ├── __init__.py          ← required
+│   ├── hooks.py
+│   ├── my_custom_app/       ← module directory
+│   │   ├── __init__.py      ← required
+│   │   └── doctype/
+│   │       ├── __init__.py  ← required
+│   │       └── my_doctype/
+│   │           ├── __init__.py   ← required
+│   │           ├── my_doctype.py
+│   │           └── my_doctype.json
+│   └── data_migration/
+│       ├── __init__.py      ← required (even if empty)
+│       └── import_data.py
+```
+
+A quick way to create missing `__init__.py` files across your app:
+
+```bash
+find apps/my_custom_app -type d -exec touch {}/__init__.py \;
+```

@@ -91,7 +91,7 @@ def get_depreciation_trend():
 	
 	data = []
 	for i in range(12, 0, -1):
-		month_date = add_months(today(), -i)
+		month_date = getdate(add_months(today(), -i))  # add_months returns str in v16
 		
 		total_depreciation = frappe.db.sql("""
 			SELECT SUM(accumulated_depreciation)

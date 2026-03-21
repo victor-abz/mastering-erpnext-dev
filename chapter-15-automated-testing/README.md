@@ -2134,3 +2134,70 @@ Automated testing ensures code quality and reliability:
 ---
 
 **Next Chapter**: Performance tuning and optimization strategies.
+
+
+---
+
+## Addendum: FrappeTestCase vs unittest.TestCase
+
+### A.1 Why `FrappeTestCase` Instead of Plain `unittest.TestCase`
+
+`frappe.tests.utils.FrappeTestCase` (v14+) wraps `unittest.TestCase` with Frappe-specific setup that plain `unittest.TestCase` does not provide:
+
+| Feature | `unittest.TestCase` | `FrappeTestCase` |
+|---------|--------------------|--------------------|
+| Database transaction rollback after each test | ✗ manual | ✓ automatic |
+| `frappe.init()` / site context | ✗ must call manually | ✓ handled in `setUpClass` |
+| `frappe.flags.test_events = 1` | ✗ | ✓ set automatically |
+| `frappe.db.rollback()` in `tearDown` | ✗ | ✓ |
+| Access to `self.assertDocumentEqual()` helper | ✗ | ✓ |
+| Works with `bench run-tests` | ✓ (if site is initialised) | ✓ |
+
+Always inherit from `FrappeTestCase` for DocType and API tests:
+
+```python
+# tests/test_asset.py
+from frappe.tests.utils import FrappeTestCase
+
+class TestAsset(FrappeTestCase):
+    def test_naming_series(self):
+        doc = frappe.get_doc({
+            "doctype": "Asset",
+            "asset_name": "Laptop 001",
+            "asset_category": "Electronics",
+            "purchase_date": "2025-01-01",
+            "purchase_cost": 1500,
+        })
+        doc.insert()
+        self.assertTrue(doc.name.startswith("AST-"))
+```
+
+Use plain `unittest.TestCase` only for pure-Python utility functions that have zero Frappe dependencies.
+
+### A.2 Running Tests
+
+```bash
+# Run all tests for an app
+bench --site dev.local run-tests --app asset_management
+
+# Run a specific test module
+bench --site dev.local run-tests --module asset_management.tests.test_asset
+
+# Run a specific test class
+bench --site dev.local run-tests --module asset_management.tests.test_asset \
+    --test TestAssetDepreciationEdgeCases
+```
+
+### A.3 `TestAssetDepreciationEdgeCases` (added in this session)
+
+The file `chapter-15-automated-testing/tests/test_asset.py` now includes a `TestAssetDepreciationEdgeCases` class that covers:
+
+- Zero purchase cost
+- Depreciation on the purchase date itself
+- Fully depreciated asset (book value = 0)
+- Depreciation with a mid-year purchase
+- Negative depreciation guard
+- Leap-year date boundary
+- Asset with no depreciation schedule
+
+These edge cases complement the existing `TestAssetController` and `TestAssetMethods` classes and are designed to run with `FrappeTestCase` so each test is automatically rolled back.

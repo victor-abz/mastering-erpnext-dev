@@ -48,8 +48,8 @@ def update_asset_values():
 	
 	for asset in assets:
 		doc = frappe.get_doc('Asset', asset.name)
-		doc.calculate_depreciation()
-		doc.calculate_current_value()
+		doc._compute_depreciation()
+		doc._compute_current_value()
 		doc.db_update()
 	
 	frappe.db.commit()

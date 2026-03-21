@@ -28,24 +28,44 @@ class AssetAssignment(Document):
 				frappe.throw(_("To date cannot be before from date"))
 	
 	def validate_asset_availability(self):
-		"""Check if asset is available"""
+		"""Check if asset is available and not simultaneously assigned"""
 		if self.asset:
 			asset_status = frappe.db.get_value('Asset', self.asset, 'status')
-			
+
 			if asset_status != 'Available' and self.is_new():
 				frappe.throw(_("Asset {0} is not available for assignment").format(self.asset))
-			
-			# Check for overlapping assignments
-			overlapping = frappe.db.exists('Asset Assignment', {
+
+			# Check for overlapping assignments (simultaneous assignment prevention)
+			# An overlap exists when another active assignment's date range intersects ours.
+			# Condition: existing.from_date <= our.to_date  AND  existing.to_date >= our.from_date
+			to_date = self.to_date or '2099-12-31'
+			overlapping = frappe.db.sql("""
+				SELECT name, employee, from_date, to_date
+				FROM `tabAsset Assignment`
+				WHERE asset = %(asset)s
+				  AND docstatus = 1
+				  AND name != %(name)s
+				  AND from_date <= %(to_date)s
+				  AND COALESCE(to_date, '2099-12-31') >= %(from_date)s
+				LIMIT 1
+			""", {
 				'asset': self.asset,
-				'docstatus': 1,
-				'from_date': ['<=', self.to_date or '2099-12-31'],
-				'to_date': ['>=', self.from_date],
-				'name': ['!=', self.name]
-			})
-			
+				'name': self.name or '',
+				'from_date': self.from_date,
+				'to_date': to_date
+			}, as_dict=True)
+
 			if overlapping:
-				frappe.throw(_("Asset {0} is already assigned for this period").format(self.asset))
+				conflict = overlapping[0]
+				frappe.throw(_(
+					"Asset {0} is already assigned to {1} from {2} to {3}. "
+					"Simultaneous assignments are not allowed."
+				).format(
+					self.asset,
+					conflict.employee,
+					conflict.from_date,
+					conflict.to_date or _('open-ended')
+				))
 	
 	def validate_employee(self):
 		"""Validate employee exists and is active"""

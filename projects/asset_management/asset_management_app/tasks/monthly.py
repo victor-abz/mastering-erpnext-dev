@@ -21,8 +21,8 @@ def calculate_depreciation():
 			doc = frappe.get_doc('Asset', asset.name)
 			
 			# Calculate depreciation
-			doc.calculate_depreciation()
-			doc.calculate_current_value()
+			doc._compute_depreciation()
+			doc._compute_current_value()
 			
 			# Save without triggering full validation
 			doc.db_update()

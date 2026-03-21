@@ -4,9 +4,12 @@
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
+ "autoname": "naming_series:",
  "field_order": [
+  "naming_series",
   "asset_name",
   "asset_category",
+  "company",
   "item_code",
   "column_break_1",
   "status",
@@ -15,6 +18,9 @@
   "section_break_2",
   "purchase_date",
   "purchase_amount",
+  "commissioning_date",
+  "serial_number",
+  "asset_id",
   "supplier",
   "column_break_3",
   "available_from_date",
@@ -25,9 +31,19 @@
   "useful_life",
   "column_break_5",
   "salvage_value",
-  "depreciation_rate"
+  "depreciation_rate",
+  "asset_type",
+  "available_for_use_date"
  ],
+ "is_submittable": 1,
  "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "ASSET-GEN-.######",
+   "default": "ASSET-GEN-.######"
+  },
   {
    "fieldname": "asset_name",
    "fieldtype": "Data",
@@ -44,6 +60,14 @@
    "reqd": 1
   },
   {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "remember_last_selected_value": 1
+  },
+  {
    "fieldname": "item_code",
    "fieldtype": "Link",
    "label": "Item Code",
@@ -58,7 +82,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Available\nIn Use\nUnder Maintenance\nScrapped",
+   "options": "Available\nIn Stock\nIn Use\nUnder Maintenance\nScrapped",
    "default": "Available"
   },
   {
@@ -89,6 +113,22 @@
    "fieldtype": "Currency",
    "label": "Purchase Amount",
    "reqd": 1
+  },
+  {
+   "fieldname": "commissioning_date",
+   "fieldtype": "Date",
+   "label": "Commissioning Date"
+  },
+  {
+   "fieldname": "serial_number",
+   "fieldtype": "Data",
+   "label": "Serial Number"
+  },
+  {
+   "fieldname": "asset_id",
+   "fieldtype": "Data",
+   "label": "Asset ID",
+   "read_only": 1
   },
   {
    "fieldname": "supplier",
@@ -126,7 +166,7 @@
    "fieldname": "depreciation_method",
    "fieldtype": "Select",
    "label": "Depreciation Method",
-   "options": "Straight Line\nWritten Down Value\nManual"
+   "options": "\nStraight Line\nWritten Down Value\nManual"
   },
   {
    "fieldname": "useful_life",
@@ -146,6 +186,20 @@
    "fieldname": "depreciation_rate",
    "fieldtype": "Percent",
    "label": "Depreciation Rate"
+  },
+  {
+   "fieldname": "asset_type",
+   "fieldtype": "Select",
+   "label": "Asset Type",
+   "options": "Existing Asset\nNew Asset",
+   "default": "Existing Asset",
+   "hidden": 1
+  },
+  {
+   "fieldname": "available_for_use_date",
+   "fieldtype": "Date",
+   "label": "Available For Use Date",
+   "hidden": 1
   }
  ],
  "modified": "2024-01-01 10:00:00.000000",

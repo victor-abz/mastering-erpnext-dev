@@ -1029,3 +1029,114 @@ Mastering controllers is essential for robust Frappe applications:
 ---
 
 **Next Chapter**: Mastering the Frappe ORM for efficient database operations.
+
+
+---
+
+## 📌 Addendum: Document Lifecycle Flowchart & production_plan_controller.py
+
+### Document Lifecycle — ASCII Flowchart
+
+```
+  frappe.get_doc({...})
+         │
+         ▼
+    ┌─────────┐
+    │ __init__ │  (autoname if new)
+    └────┬────┘
+         │ insert() / save()
+         ▼
+    ┌──────────┐
+    │before_insert│ (new docs only)
+    └─────┬────┘
+          │
+          ▼
+    ┌──────────┐
+    │ validate  │  ← main validation hook
+    └─────┬────┘
+          │
+          ▼
+    ┌─────────────┐
+    │ before_save  │
+    └──────┬──────┘
+           │
+           ▼
+    ┌──────────────┐
+    │  db_insert /  │  ← actual SQL write
+    │  db_update    │
+    └──────┬───────┘
+           │
+           ▼
+    ┌──────────┐
+    │ after_insert│ (new docs only)
+    └─────┬────┘
+          │
+          ▼
+    ┌──────────┐
+    │ on_update │  ← runs after every save
+    └─────┬────┘
+          │
+    ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+    On submit():
+          │
+          ▼
+    ┌───────────────┐
+    │ before_submit  │
+    └──────┬────────┘
+           │
+           ▼
+    ┌──────────────┐
+    │  db_update    │  (docstatus = 1)
+    └──────┬───────┘
+           │
+           ▼
+    ┌───────────┐
+    │ on_submit  │
+    └─────┬─────┘
+          │
+          ▼
+    ┌────────────┐
+    │after_submit │
+    └────────────┘
+
+    On cancel():
+    ┌───────────────┐
+    │ before_cancel  │
+    └──────┬────────┘
+           │
+           ▼
+    ┌──────────────┐
+    │  db_update    │  (docstatus = 2)
+    └──────┬───────┘
+           │
+           ▼
+    ┌───────────┐
+    │ on_cancel  │
+    └─────┬─────┘
+          │
+          ▼
+    ┌────────────┐
+    │after_cancel │
+    └────────────┘
+
+    On delete():
+    ┌───────────┐
+    │ on_trash   │  ← before DB deletion
+    └─────┬─────┘
+          │
+          ▼
+    ┌──────────────┐
+    │ after_delete  │  ← after DB deletion
+    └──────────────┘
+```
+
+### Cross-Reference: production_plan_controller.py
+
+The `production_plan_controller.py` in `chapter-05-controller-deep-dive/controller_examples/` demonstrates several advanced patterns covered in this chapter:
+
+- **`validate()`** — date range validation and total calculation
+- **`on_submit()`** — triggering downstream work order creation
+- **`set_status()`** — deriving document status from business state rather than storing it manually
+- **BOM explosion** — a real-world example of N+1 avoidance using batch SQL queries
+
+See also `projects/production_planning/` for the full working implementation including `get_permission_query_conditions()` — a practical example of row-level permission filtering.

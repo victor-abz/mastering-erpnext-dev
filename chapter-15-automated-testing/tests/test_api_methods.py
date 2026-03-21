@@ -31,6 +31,7 @@ class TestAPIMethods(unittest.TestCase):
 				'territory': 'All Territories'
 			})
 			customer.insert()
+			frappe.db.commit()  # commit so tearDown rollback doesn't wipe it
 	
 	def test_get_customer_balance(self):
 		"""Test get customer balance API"""

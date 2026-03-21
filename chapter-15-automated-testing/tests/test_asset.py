@@ -291,7 +291,7 @@ class TestAsset(unittest.TestCase):
 		
 		# Test with salvage value floor
 		asset.salvage_value = 900.00
-		asset.calculate_current_value()
+		asset._compute_current_value()
 		self.assertGreaterEqual(asset.current_value, asset.salvage_value)
 	
 	def test_asset_status_transition(self):
@@ -318,8 +318,9 @@ class TestAsset(unittest.TestCase):
 		]
 		
 		for from_status, to_status in valid_transitions:
-			asset.status = from_status
-			asset.save()
+			# Reset directly in DB to avoid transition validation between iterations
+			frappe.db.set_value('Asset', asset.name, 'status', from_status)
+			asset.reload()
 			asset.status = to_status
 			asset.save()
 			saved_asset = frappe.get_doc('Asset', asset.name)
@@ -464,3 +465,136 @@ def run_tests():
 
 if __name__ == '__main__':
 	run_tests()
+
+
+class TestAssetDepreciationEdgeCases(unittest.TestCase):
+	"""Edge case tests for calculate_depreciation() and related logic."""
+
+	def setUp(self):
+		"""Set up minimal test data."""
+		if not frappe.db.exists('Asset Category', 'Test Category'):
+			frappe.get_doc({
+				'doctype': 'Asset Category',
+				'category_name': 'Test Category',
+				'depreciation_method': 'Straight Line',
+				'useful_life': 5,
+				'status': 'Active'
+			}).insert()
+
+		if not frappe.db.exists('Item', 'TEST-ASSET-001'):
+			frappe.get_doc({
+				'doctype': 'Item',
+				'item_code': 'TEST-ASSET-001',
+				'item_name': 'Test Asset Item',
+				'item_group': 'Products',
+				'stock_uom': 'Nos',
+				'is_stock_item': 1
+			}).insert()
+
+	def tearDown(self):
+		frappe.db.rollback()
+
+	def _make_asset(self, **kwargs):
+		defaults = {
+			'doctype': 'Asset',
+			'asset_name': 'Edge Case Asset',
+			'asset_category': 'Test Category',
+			'item_code': 'TEST-ASSET-001',
+			'purchase_date': today(),
+			'purchase_amount': 1000.00,
+		}
+		defaults.update(kwargs)
+		return frappe.get_doc(defaults)
+
+	def test_depreciation_zero_useful_life_raises(self):
+		"""useful_life = 0 should raise a ValidationError (division by zero guard)."""
+		asset = self._make_asset(
+			depreciation_method='Straight Line',
+			useful_life=0,
+			purchase_amount=1000.00
+		)
+		with self.assertRaises((frappe.ValidationError, ZeroDivisionError)):
+			asset.insert()
+
+	def test_depreciation_does_not_go_below_salvage_value(self):
+		"""Current value must never fall below salvage_value."""
+		past_date = add_days(today(), -365 * 10)  # 10 years ago, well past useful life
+		asset = self._make_asset(
+			purchase_date=past_date,
+			purchase_amount=1000.00,
+			salvage_value=100.00,
+			depreciation_method='Straight Line',
+			useful_life=5
+		)
+		asset.insert()
+		# After 10 years (2× useful life), current_value must equal salvage_value
+		self.assertGreaterEqual(asset.current_value, 100.00)
+
+	def test_depreciation_new_asset_is_zero(self):
+		"""A brand-new asset (purchased today) should have zero accumulated depreciation."""
+		asset = self._make_asset(
+			purchase_date=today(),
+			purchase_amount=5000.00,
+			depreciation_method='Straight Line',
+			useful_life=5
+		)
+		asset.insert()
+		self.assertEqual(asset.accumulated_depreciation or 0, 0)
+		self.assertEqual(asset.current_value, 5000.00)
+
+	def test_depreciation_salvage_value_equals_purchase_amount(self):
+		"""When salvage_value == purchase_amount, depreciation should be zero."""
+		asset = self._make_asset(
+			purchase_date=add_days(today(), -365),
+			purchase_amount=1000.00,
+			salvage_value=1000.00,
+			depreciation_method='Straight Line',
+			useful_life=5
+		)
+		asset.insert()
+		self.assertEqual(asset.accumulated_depreciation or 0, 0)
+		self.assertEqual(asset.current_value, 1000.00)
+
+	def test_wdv_depreciation_never_reaches_zero(self):
+		"""Written Down Value depreciation asymptotically approaches zero, never negative."""
+		if not frappe.db.exists('Asset Category', 'WDV Edge Category'):
+			frappe.get_doc({
+				'doctype': 'Asset Category',
+				'category_name': 'WDV Edge Category',
+				'depreciation_method': 'Written Down Value',
+				'depreciation_rate': 50.0,
+				'status': 'Active'
+			}).insert()
+
+		past_date = add_days(today(), -365 * 5)  # 5 years ago at 50% WDV
+		asset = self._make_asset(
+			asset_category='WDV Edge Category',
+			purchase_date=past_date,
+			purchase_amount=1000.00,
+			depreciation_method='Written Down Value',
+			depreciation_rate=50.0
+		)
+		asset.insert()
+		self.assertGreater(asset.current_value, 0)
+		self.assertLessEqual(asset.accumulated_depreciation, asset.purchase_amount)
+
+	def test_depreciation_negative_purchase_amount_raises(self):
+		"""Negative purchase_amount must be rejected."""
+		asset = self._make_asset(purchase_amount=-500.00)
+		with self.assertRaises(frappe.ValidationError):
+			asset.insert()
+
+	def test_depreciation_fractional_useful_life(self):
+		"""useful_life < 1 year (e.g. 0.5) should either work or raise cleanly."""
+		asset = self._make_asset(
+			purchase_date=add_days(today(), -180),
+			purchase_amount=1000.00,
+			depreciation_method='Straight Line',
+			useful_life=0.5
+		)
+		try:
+			asset.insert()
+			# If it succeeds, current_value should be <= purchase_amount
+			self.assertLessEqual(asset.current_value, asset.purchase_amount)
+		except (frappe.ValidationError, ZeroDivisionError):
+			pass  # Acceptable — fractional useful_life may not be supported

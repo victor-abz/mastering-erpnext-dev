@@ -1,0 +1,78 @@
+{
+ "charts": [],
+ "content": "[{\"id\":\"xSvHMa\",\"type\":\"onboarding\",\"data\":{\"onboarding_name\":\"Asset Management\",\"col\":12}},{\"id\":\"aB1cDe\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Asset\",\"col\":3}},{\"id\":\"fG2hIj\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Asset Category\",\"col\":3}},{\"id\":\"kL3mNo\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Asset Assignment\",\"col\":3}}]",
+ "creation": "2024-01-01 10:00:00.000000",
+ "doctype": "Workspace",
+ "hide_custom": 0,
+ "is_hidden": 0,
+ "label": "Asset Management",
+ "module": "Asset Management",
+ "name": "Asset Management",
+ "owner": "Administrator",
+ "public": 1,
+ "roles": [],
+ "shortcuts": [
+  {
+   "color": "Blue",
+   "format": "{} Asset",
+   "label": "Asset",
+   "link_to": "Asset",
+   "stats_filter": "{}",
+   "type": "DocType"
+  },
+  {
+   "color": "Green",
+   "label": "Asset Category",
+   "link_to": "Asset Category",
+   "type": "DocType"
+  },
+  {
+   "color": "Orange",
+   "label": "Asset Assignment",
+   "link_to": "Asset Assignment",
+   "type": "DocType"
+  }
+ ],
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Assets",
+   "link_count": 0,
+   "link_to": "Asset",
+   "link_type": "DocType",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Asset Category",
+   "link_count": 0,
+   "link_to": "Asset Category",
+   "link_type": "DocType",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Asset Assignment",
+   "link_count": 0,
+   "link_to": "Asset Assignment",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Asset Maintenance",
+   "link_count": 0,
+   "link_to": "Asset Maintenance",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ]
+}

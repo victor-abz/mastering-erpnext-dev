@@ -6,7 +6,8 @@ Chapter 17: Production Pipeline
 
 import frappe
 from frappe.utils import now, get_datetime
-import psutil
+import shutil
+import os
 import json
 
 @frappe.whitelist(allow_guest=True)
@@ -84,29 +85,39 @@ def check_worker_health():
 def check_disk_usage():
 	"""Check disk usage"""
 	try:
-		disk = psutil.disk_usage('/')
-		
+		total, used, free = shutil.disk_usage('/')
+		percent = round(used / total * 100, 1)
+
 		return {
-			'status': 'healthy' if disk.percent < 80 else 'warning',
-			'total_gb': round(disk.total / (1024**3), 2),
-			'used_gb': round(disk.used / (1024**3), 2),
-			'free_gb': round(disk.free / (1024**3), 2),
-			'percent_used': disk.percent
+			'status': 'healthy' if percent < 80 else 'warning',
+			'total_gb': round(total / (1024**3), 2),
+			'used_gb': round(used / (1024**3), 2),
+			'free_gb': round(free / (1024**3), 2),
+			'percent_used': percent
 		}
 	except Exception as e:
 		return {'status': 'unknown', 'error': str(e)}
 
 def check_memory_usage():
-	"""Check memory usage"""
+	"""Check memory usage (reads /proc/meminfo on Linux)"""
 	try:
-		memory = psutil.virtual_memory()
-		
+		meminfo = {}
+		with open('/proc/meminfo') as f:
+			for line in f:
+				key, val = line.split(':')
+				meminfo[key.strip()] = int(val.split()[0]) * 1024  # kB -> bytes
+
+		total = meminfo.get('MemTotal', 0)
+		available = meminfo.get('MemAvailable', 0)
+		used = total - available
+		percent = round(used / total * 100, 1) if total else 0
+
 		return {
-			'status': 'healthy' if memory.percent < 80 else 'warning',
-			'total_gb': round(memory.total / (1024**3), 2),
-			'used_gb': round(memory.used / (1024**3), 2),
-			'available_gb': round(memory.available / (1024**3), 2),
-			'percent_used': memory.percent
+			'status': 'healthy' if percent < 80 else 'warning',
+			'total_gb': round(total / (1024**3), 2),
+			'used_gb': round(used / (1024**3), 2),
+			'available_gb': round(available / (1024**3), 2),
+			'percent_used': percent
 		}
 	except Exception as e:
 		return {'status': 'unknown', 'error': str(e)}

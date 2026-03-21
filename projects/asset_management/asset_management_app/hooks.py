@@ -92,16 +92,9 @@ app_license = "MIT"
 # Hook on document methods and events
 
 doc_events = {
-	"Asset": {
-		"validate": "asset_management_app.asset_management.doctype.asset.asset.validate_asset",
-		"on_update": "asset_management_app.asset_management.doctype.asset.asset.on_asset_update",
-		"on_submit": "asset_management_app.asset_management.doctype.asset.asset.on_asset_submit",
-		"on_cancel": "asset_management_app.asset_management.doctype.asset.asset.on_asset_cancel"
-	},
-	"Asset Assignment": {
-		"on_submit": "asset_management_app.asset_management.doctype.asset_assignment.asset_assignment.on_assignment_submit",
-		"on_cancel": "asset_management_app.asset_management.doctype.asset_assignment.asset_assignment.on_assignment_cancel"
-	}
+	# Controller class methods (validate, on_update, on_submit, on_cancel)
+	# are called automatically by Frappe — no need to register them here.
+	# Only register hooks for cross-app event listeners.
 }
 
 # Scheduled Tasks

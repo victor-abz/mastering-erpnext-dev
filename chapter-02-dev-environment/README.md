@@ -624,6 +624,79 @@ bench --site dev.local migrate
 tail -f logs/worker.log
 ```
 
+---
+
+## 📌 Addendum: Testing the Book's Code with frappe_docker
+
+If you already have ERPNext running via [frappe_docker](https://github.com/frappe/frappe_docker), use the scripts in `environment/` to install and test all three project apps without touching your bench setup.
+
+### Step 1 — Find your container and site name
+
+```bash
+# List running containers — look for the 'backend' service
+docker ps --format "table {{.Names}}\t{{.Status}}"
+
+# Find your site name (usually 'frontend' in frappe_docker)
+docker exec backend bash -c \
+    "ls /home/frappe/frappe-bench/sites | grep -v assets | grep -v apps.txt"
+```
+
+### Step 2 — Install all three apps
+
+```bash
+# From the repo root:
+bash environment/install-book-apps.sh frontend backend
+```
+
+This copies the app source, pip-installs it, registers it in bench, runs `install-app`, and migrates.
+
+### Step 3 — Run the test suite
+
+```bash
+# All apps:
+bash environment/run-tests.sh frontend backend
+
+# One app only:
+bash environment/run-tests.sh frontend backend asset_management_app
+```
+
+### Step 4 — Interactive testing via bench console
+
+```bash
+bash environment/console.sh frontend backend
+```
+
+Inside the console you can test any chapter's code directly:
+
+```python
+# Chapter 6 — ORM examples
+frappe.get_all('Asset', filters={'status': 'In Stock'}, fields=['name', 'asset_name'])
+
+# Chapter 5 — Controller
+doc = frappe.get_doc('Asset', 'ASSET-00001')
+doc.calculate_depreciation()
+
+# Chapter 13 — Vendor Portal API (simulate a request)
+from vendor_portal_app.vendor_portal.api.vendor import authenticate
+result = authenticate(vendor_code='V-001', password='test')
+```
+
+### Sync code changes without reinstalling
+
+After editing any Python file locally, sync it into the container and restart workers:
+
+```bash
+# Sync one app
+docker cp projects/asset_management/asset_management_app/. \
+    backend:/home/frappe/frappe-bench/apps/asset_management_app/
+
+# Restart workers to pick up changes
+docker exec backend bash -c \
+    "cd /home/frappe/frappe-bench && bench restart"
+```
+
+---
+
 ## 📖 Further Reading
 
 - [Bench Documentation](https://frappeframework.com/docs/user/en/bench)
@@ -643,3 +716,58 @@ A professional development environment is crucial for productive ERPNext develop
 ---
 
 **Next Chapter**: Understanding the anatomy of a Frappe application.
+
+---
+
+## 📌 Addendum: First 10 Commands Every Frappe Developer Should Know
+
+```bash
+# 1. Start the development server (foreground, all services)
+bench start
+
+# 2. Serve only the web process on a specific port (no workers/scheduler)
+#    Use this when you only need HTTP responses and want a lighter process.
+bench serve --port 8000
+
+# bench start  vs  bench serve
+# ─────────────────────────────
+# bench start   → starts gunicorn + Redis workers + scheduler + socket.io
+#                 Use for full local development (background jobs, real-time)
+# bench serve   → starts gunicorn only
+#                 Use for quick API testing or when workers are not needed
+
+# 3. Open an interactive Python console with full Frappe context loaded
+bench --site dev.local console
+# Inside the console:
+# >>> frappe.get_doc('Customer', 'CUST-00001')
+# >>> frappe.db.count('Sales Order')
+
+# 4. Run all pending database migrations (after pulling new code or adding fields)
+bench --site dev.local migrate
+
+# 5. Clear all caches (Redis + file-based)
+bench --site dev.local clear-cache
+
+# 6. Clear website cache only (useful after template changes)
+bench --site dev.local clear-website-cache
+
+# 7. Restart all background workers and the web server
+bench restart
+
+# 8. Rebuild JS/CSS assets (required after editing public/ files)
+bench build --app my_custom_app
+
+# 9. Run the test suite for a specific app
+bench --site dev.local run-tests --app my_custom_app
+
+# 10. Execute a one-off Python function (useful for data fixes)
+bench --site dev.local execute my_custom_app.utils.fix_data
+```
+
+### Key Concepts
+
+- `bench start` is your daily driver — it wires up all services via `Procfile`.
+- `bench serve` is a lightweight alternative when you only need HTTP (no background jobs).
+- Always run `bench migrate` after pulling upstream changes that include schema updates.
+- `bench clear-cache` is the first thing to try when you see stale data or unexpected UI behaviour.
+- `bench restart` is needed after changing `hooks.py` or Python files that are cached by gunicorn workers.

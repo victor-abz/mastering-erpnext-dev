@@ -1471,3 +1471,81 @@ Mastering the Frappe ORM is essential for efficient database operations:
 ---
 
 **Next Chapter**: Client-side mastery with JavaScript and form scripting.
+
+
+---
+
+## 📌 Addendum: Choosing the Right ORM Method — N+1 Implications
+
+### frappe.db.get_value vs frappe.db.get_all vs frappe.get_doc
+
+| Method | Returns | Best for | Watch out for |
+|--------|---------|----------|---------------|
+| `frappe.db.get_value(doctype, name, fieldname)` | Single scalar or tuple | One field / a few fields from one known document | Returns `None` silently if doc doesn't exist |
+| `frappe.db.get_all(doctype, filters, fields)` | List of dicts | Filtered lists, reports, dashboards | Does **not** load child tables; respects permissions |
+| `frappe.get_doc(doctype, name)` | Full Document object | When you need to call methods, access child tables, or run hooks | Loads **all** fields + child tables — expensive in loops |
+
+### The N+1 Problem in Frappe
+
+The classic N+1 pattern looks like this:
+
+```python
+# ❌ BAD — 1 query to get orders + N queries inside the loop
+orders = frappe.get_all('Sales Order', filters={'docstatus': 1}, fields=['name', 'customer'])
+for order in orders:
+    # This fires a separate SQL query for EVERY order
+    credit_limit = frappe.db.get_value('Customer', order.customer, 'credit_limit')
+    process(order, credit_limit)
+```
+
+Fix it with a single batch query:
+
+```python
+# ✅ GOOD — 2 queries total regardless of list size
+orders = frappe.get_all('Sales Order', filters={'docstatus': 1}, fields=['name', 'customer'])
+
+# Collect unique customers, fetch all at once
+customer_names = list({o.customer for o in orders})
+customers = frappe.get_all(
+    'Customer',
+    filters={'name': ['in', customer_names]},
+    fields=['name', 'credit_limit']
+)
+credit_map = {c.name: c.credit_limit for c in customers}
+
+for order in orders:
+    process(order, credit_map.get(order.customer, 0))
+```
+
+### When to use each
+
+```python
+# frappe.db.get_value — single field lookup
+email = frappe.db.get_value('Customer', 'CUST-001', 'email_id')
+
+# frappe.db.get_value — multiple fields (returns tuple)
+name, group = frappe.db.get_value('Customer', 'CUST-001', ['customer_name', 'customer_group'])
+
+# frappe.db.get_all — filtered list (no child tables)
+active_customers = frappe.db.get_all(
+    'Customer',
+    filters={'status': 'Active'},
+    fields=['name', 'customer_name', 'credit_limit'],
+    order_by='customer_name asc',
+    limit=100
+)
+
+# frappe.get_doc — full document with child tables and method access
+so = frappe.get_doc('Sales Order', 'SO-0001')
+so.submit()  # calls on_submit hooks, updates docstatus, etc.
+
+# frappe.db.sql — complex aggregations the ORM cannot express
+result = frappe.db.sql("""
+    SELECT customer, SUM(grand_total) as total
+    FROM `tabSales Order`
+    WHERE docstatus = 1
+    GROUP BY customer
+    HAVING total > 50000
+    ORDER BY total DESC
+""", as_dict=True)
+```

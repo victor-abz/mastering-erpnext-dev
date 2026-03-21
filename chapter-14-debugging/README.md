@@ -1218,3 +1218,103 @@ Professional debugging requires a systematic approach:
 ---
 
 **Next Chapter**: Building automated testing strategies.
+
+
+---
+
+## Addendum: pdb/ipdb Integration & Logger Guidance
+
+### A.1 Using `pdb` / `ipdb` with Bench
+
+Standard Python debuggers work inside Frappe's worker processes. The key is to attach to the **foreground** bench process, not a daemonised supervisor worker.
+
+**Step 1 — run bench in the foreground**
+
+```bash
+# Terminal 1: start bench without supervisor so stdout is visible
+bench serve --port 8000
+# or for background workers:
+bench worker --queue default
+```
+
+**Step 2 — insert a breakpoint in your code**
+
+```python
+# your_app/doctype/asset/asset.py
+def validate(self):
+    # Standard library — no extra install needed (Python 3.7+)
+    breakpoint()          # equivalent to import pdb; pdb.set_trace()
+    self._check_purchase_cost()
+```
+
+For a richer REPL (syntax highlighting, tab completion) install `ipdb`:
+
+```bash
+pip install ipdb
+```
+
+```python
+import ipdb; ipdb.set_trace()
+```
+
+**Step 3 — trigger the code path** (save the document, call the API, etc.) and the debugger prompt appears in Terminal 1.
+
+Common pdb commands:
+
+| Command | Action |
+|---------|--------|
+| `n` | next line (step over) |
+| `s` | step into function |
+| `c` | continue execution |
+| `p expr` | print expression |
+| `pp expr` | pretty-print expression |
+| `l` | list surrounding source |
+| `bt` | print call stack |
+| `q` | quit debugger |
+
+> **Note:** Never leave `breakpoint()` calls in committed code. Use a pre-commit hook or `grep -r "breakpoint()" apps/` in CI to catch them.
+
+### A.2 `frappe.logger()` vs `frappe.log_error()` — When to Use Which
+
+| | `frappe.logger()` | `frappe.log_error()` |
+|---|---|---|
+| **What it does** | Returns a Python `logging.Logger` instance; writes to `logs/<site>.log` | Creates an **Error Log** document in the database and optionally emails admins |
+| **Severity levels** | DEBUG, INFO, WARNING, ERROR, CRITICAL | Always stored as an error; no severity levels |
+| **Visible in UI** | No (file only) | Yes — Desk → Error Log list |
+| **Performance** | Very low overhead | Writes a DB row; avoid in hot paths |
+| **Best for** | Diagnostic traces, INFO/DEBUG messages, performance timings | Unexpected exceptions that need human review |
+| **Retention** | Rotated by `logrotate` / bench log rotation | Stays in DB until manually cleared |
+
+```python
+import frappe
+
+# --- Use frappe.logger() for routine diagnostics ---
+logger = frappe.logger("asset_management", allow_site=True, file_count=50)
+
+def sync_assets():
+    logger.info("Starting asset sync")
+    try:
+        count = _do_sync()
+        logger.info("Sync complete: %d assets processed", count)
+    except Exception:
+        # Log full traceback to file at ERROR level
+        logger.exception("Asset sync failed")
+        raise
+
+# --- Use frappe.log_error() for exceptions that need a ticket ---
+def submit_asset(asset_name: str):
+    try:
+        doc = frappe.get_doc("Asset", asset_name)
+        doc.submit()
+    except Exception as exc:
+        # Creates an Error Log row visible in the Desk
+        frappe.log_error(
+            title=f"Failed to submit Asset {asset_name}",
+            message=frappe.get_traceback(),
+            reference_doctype="Asset",
+            reference_name=asset_name,
+        )
+        frappe.throw(f"Could not submit asset: {exc}")
+```
+
+Rule of thumb: use `frappe.logger()` for everything you would normally `print()` during development, and `frappe.log_error()` only when you need the error to surface in the Desk for an admin to act on.

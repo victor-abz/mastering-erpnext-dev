@@ -38,7 +38,7 @@ class AssetMaintenance(Document):
 					}
 					
 					months = frequency_map.get(category.maintenance_frequency, 3)
-					self.next_maintenance_date = add_months(self.maintenance_date, months)
+					self.next_maintenance_date = getdate(add_months(self.maintenance_date, months))
 	
 	def on_update(self):
 		"""After save operations"""

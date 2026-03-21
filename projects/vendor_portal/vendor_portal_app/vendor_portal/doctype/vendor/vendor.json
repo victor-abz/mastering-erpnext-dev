@@ -1,0 +1,115 @@
+{
+ "actions": [],
+ "autoname": "field:vendor_name",
+ "creation": "2024-01-01 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "vendor_name",
+  "status",
+  "email",
+  "phone",
+  "section_api",
+  "api_key",
+  "api_secret",
+  "section_webhook",
+  "webhook_url",
+  "webhook_secret",
+  "sync_enabled",
+  "api_endpoint"
+ ],
+ "fields": [
+  {
+   "fieldname": "vendor_name",
+   "fieldtype": "Data",
+   "label": "Vendor Name",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Active\nInactive\nBlocked",
+   "default": "Active",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "phone",
+   "fieldtype": "Data",
+   "label": "Phone"
+  },
+  {
+   "fieldname": "section_api",
+   "fieldtype": "Section Break",
+   "label": "API Credentials"
+  },
+  {
+   "fieldname": "api_key",
+   "fieldtype": "Data",
+   "label": "API Key",
+   "read_only": 1
+  },
+  {
+   "fieldname": "api_secret",
+   "fieldtype": "Password",
+   "label": "API Secret",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_webhook",
+   "fieldtype": "Section Break",
+   "label": "Webhook Settings"
+  },
+  {
+   "fieldname": "webhook_url",
+   "fieldtype": "Data",
+   "label": "Webhook URL"
+  },
+  {
+   "fieldname": "webhook_secret",
+   "fieldtype": "Password",
+   "label": "Webhook Secret"
+  },
+  {
+   "fieldname": "sync_enabled",
+   "fieldtype": "Check",
+   "label": "Sync Enabled"
+  },
+  {
+   "fieldname": "api_endpoint",
+   "fieldtype": "Data",
+   "label": "API Endpoint"
+  }
+ ],
+ "links": [],
+ "modified": "2024-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Vendor Portal",
+ "name": "Vendor",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

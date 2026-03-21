@@ -51,11 +51,57 @@ class ProductionPlan(Document):
 		self.create_work_orders()
 	
 	def create_work_orders(self):
-		"""Create work orders for planned items"""
+		"""Create work orders for planned items.
+
+		TODO: Replace the placeholder below with actual Work Order creation once
+		the Work Order DocType is defined in this app. Each po_items row should
+		produce one Work Order linked back to this Production Plan.
+
+		WARNING: Items without a default BOM are silently skipped here.
+		Before submitting a Production Plan, ensure every item in po_items has
+		an active default BOM (is_active=1, is_default=1). Items missing a BOM
+		will not have work orders created and will show a warning below.
+		"""
+		items_without_bom = []
+
 		for item in self.po_items:
-			if item.planned_qty > 0:
-				# In real implementation, create Work Order DocType
-				frappe.msgprint(f"Work Order would be created for {item.item_code}: {item.planned_qty} units")
+			if not item.planned_qty or item.planned_qty <= 0:
+				continue
+
+			# Check for a default BOM before attempting creation
+			default_bom = frappe.db.get_value(
+				'BOM',
+				{'item': item.item_code, 'is_active': 1, 'is_default': 1},
+				'name'
+			)
+
+			if not default_bom:
+				items_without_bom.append(item.item_code)
+				continue
+
+			# TODO: Implement Work Order creation
+			# work_order = frappe.get_doc({
+			#     'doctype': 'Work Order',
+			#     'production_item': item.item_code,
+			#     'qty': item.planned_qty,
+			#     'bom_no': default_bom,
+			#     'production_plan': self.name,
+			# })
+			# work_order.insert()
+			frappe.msgprint(
+				_("Work Order would be created for {0}: {1} units (BOM: {2})").format(
+					item.item_code, item.planned_qty, default_bom
+				)
+			)
+
+		if items_without_bom:
+			frappe.msgprint(
+				_("Warning: The following items have no default BOM and were skipped: {0}").format(
+					', '.join(items_without_bom)
+				),
+				indicator='orange',
+				title=_('Missing BOM')
+			)
 
 @frappe.whitelist()
 def get_sales_orders(from_date, to_date, company):

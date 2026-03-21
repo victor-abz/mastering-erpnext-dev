@@ -10,8 +10,6 @@
   "category_name",
   "description",
   "column_break_3",
-  "parent_category",
-  "is_group",
   "section_break_6",
   "depreciation_method",
   "useful_life",
@@ -39,18 +37,6 @@
   {
    "fieldname": "column_break_3",
    "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "parent_category",
-   "fieldtype": "Link",
-   "label": "Parent Category",
-   "options": "Asset Category"
-  },
-  {
-   "default": "0",
-   "fieldname": "is_group",
-   "fieldtype": "Check",
-   "label": "Is Group"
   },
   {
    "fieldname": "section_break_6",

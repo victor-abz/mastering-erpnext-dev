@@ -1197,3 +1197,103 @@ The permissions system provides comprehensive access control:
 ---
 
 **Next Chapter**: Building custom print formats with Jinja templating.
+
+
+---
+
+## 📌 Addendum: User Permissions ("Allow" Mechanism) & Decision Flowchart
+
+### User Permissions — The "Allow" Mechanism
+
+**Role Permissions** control *what DocTypes* a role can access.  **User Permissions** control *which specific records* a user can see within those DocTypes.
+
+A User Permission entry says: *"User X may only access documents where field Y equals value Z."*
+
+```python
+# Create a User Permission programmatically
+frappe.get_doc({
+    'doctype': 'User Permission',
+    'user': 'alice@example.com',
+    'allow': 'Company',          # The DocType being restricted
+    'for_value': 'Acme Corp',    # The specific value allowed
+    'applicable_for': '',        # Leave blank = applies to ALL doctypes
+                                 # Or set to a specific DocType e.g. 'Sales Order'
+    'is_default': 1
+}).insert(ignore_permissions=True)
+```
+
+**How it works at query time:**
+
+When `alice@example.com` runs `frappe.get_all('Sales Order', ...)`, Frappe automatically appends `AND company = 'Acme Corp'` to the SQL query — she never sees orders from other companies.
+
+**Key rules:**
+- User Permissions are additive — if a user has *no* User Permission for a DocType, they see *all* records (subject to role permissions).
+- Once *any* User Permission exists for a user+DocType combination, it acts as a whitelist — only matching records are visible.
+- `applicable_for` scopes the restriction to a single DocType; leaving it blank applies it everywhere the `allow` DocType appears as a Link field.
+
+```python
+# Check user permissions programmatically
+user_perms = frappe.get_user_permissions('alice@example.com')
+# Returns: {'Company': [{'doc': 'Acme Corp', 'is_default': 1}], ...}
+
+# Test if a specific document is accessible
+frappe.has_permission('Sales Order', 'read', 'SO-0001', user='alice@example.com')
+```
+
+### Permissions Decision Flowchart
+
+```
+  User requests access to Document D
+              │
+              ▼
+  ┌─────────────────────────────┐
+  │ Does user have a Role with  │
+  │ READ permission on DocType? │
+  └──────────┬──────────────────┘
+             │ No → ❌ DENIED
+             │ Yes
+             ▼
+  ┌─────────────────────────────────────┐
+  │ Is the DocType restricted by        │
+  │ permission_query_conditions hook?   │
+  └──────────┬──────────────────────────┘
+             │ Yes → apply SQL condition
+             │ No  → continue
+             ▼
+  ┌──────────────────────────────────────┐
+  │ Does the user have any User          │
+  │ Permission entries for this DocType  │
+  │ (directly or via a Link field)?      │
+  └──────────┬───────────────────────────┘
+             │ No  → ✅ ALLOWED (role permission sufficient)
+             │ Yes
+             ▼
+  ┌──────────────────────────────────────┐
+  │ Does Document D match at least one   │
+  │ of the user's User Permission values?│
+  └──────────┬───────────────────────────┘
+             │ No  → ❌ DENIED
+             │ Yes
+             ▼
+  ┌──────────────────────────────────────┐
+  │ Is the field permlevel accessible    │
+  │ for the user's role?                 │
+  └──────────┬───────────────────────────┘
+             │ No  → field hidden/read-only
+             │ Yes
+             ▼
+           ✅ ALLOWED
+```
+
+**Debugging permissions:**
+
+```python
+# In bench console — trace why a user cannot see a document
+frappe.set_user('alice@example.com')
+print(frappe.has_permission('Sales Order', 'read', 'SO-0001'))
+print(frappe.get_user_permissions())
+
+# Check the generated SQL condition
+from frappe.permissions import get_doc_condition
+print(get_doc_condition('Sales Order', 'alice@example.com'))
+```

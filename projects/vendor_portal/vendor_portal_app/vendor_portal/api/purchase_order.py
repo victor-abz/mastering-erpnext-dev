@@ -54,10 +54,20 @@ def acknowledge_purchase_order(purchase_order, acknowledgement_date, notes=None)
 
 def get_current_vendor():
 	"""Get current vendor from session token"""
-	token = frappe.get_request_header('Authorization', '').replace('Bearer ', '')
-	vendor = frappe.cache().get(f"vendor_token:{token}")
+	token = (frappe.get_request_header('Authorization') or '').replace('Bearer ', '')
+	if not token:
+		# Fallback: check frappe.local.request
+		try:
+			token = (frappe.local.request.headers.get('Authorization') or '').replace('Bearer ', '')
+		except Exception:
+			token = ''
+
+	token_data = frappe.cache().get(f"vendor_token:{token}")
 	
-	if not vendor:
+	if not token_data:
 		frappe.throw(_("Invalid or expired token"), frappe.AuthenticationError)
 	
-	return vendor
+	# token_data may be a dict (from authenticate()) or a plain string (from tests)
+	if isinstance(token_data, dict):
+		return token_data.get('vendor_name')
+	return token_data

@@ -51,8 +51,8 @@ def rate_limit_check(vendor_name: str, action: str = 'api_call') -> None:
 		if current_count >= 100:
 			frappe.throw(_("Rate limit exceeded. Please try again later."), frappe.PermissionError)
 		
-		# Increment counter with 1 hour expiry
-		frappe.cache().setex(cache_key, current_count + 1, 3600)
+		# Increment counter with 1 hour expiry (v16: setex(key, ttl, value))
+		frappe.cache().setex(cache_key, 3600, current_count + 1)
 		
 	except Exception as e:
 		frappe.log_error(f"Rate limiting check failed: {str(e)}")
@@ -69,7 +69,7 @@ def authenticate(api_key: str, api_secret: str) -> Dict[str, Any]:
 			frappe.throw(_("Invalid API credentials format"), frappe.ValidationError)
 		
 		# Rate limiting for authentication attempts
-		client_ip = frappe.local.request_ip
+		client_ip = getattr(frappe.local, 'request_ip', '127.0.0.1')
 		auth_attempts_key = f"auth_attempts:{client_ip}"
 		attempts = frappe.cache().get(auth_attempts_key) or 0
 		
@@ -84,8 +84,8 @@ def authenticate(api_key: str, api_secret: str) -> Dict[str, Any]:
 		)
 		
 		if not vendor:
-			# Increment failed attempts counter
-			frappe.cache().setex(auth_attempts_key, attempts + 1, 300)  # 5 minutes
+			# Increment failed attempts counter (v16: setex(key, ttl, value))
+			frappe.cache().setex(auth_attempts_key, 300, attempts + 1)  # 5 minutes
 			frappe.throw(_("Invalid API credentials"), frappe.AuthenticationError)
 		
 		# Generate secure session token
@@ -98,7 +98,7 @@ def authenticate(api_key: str, api_secret: str) -> Dict[str, Any]:
 			'vendor_email': vendor.email,
 			'created_at': time.time()
 		}
-		frappe.cache().setex(f"vendor_token:{token}", token_data, 86400)  # 24 hours
+		frappe.cache().setex(f"vendor_token:{token}", 86400, token_data)  # 24 hours (v16: key, ttl, value)
 		
 		# Clear authentication attempts on success
 		frappe.cache().delete(auth_attempts_key)
@@ -176,3 +176,118 @@ def get_purchase_orders(vendor: str, status: Optional[str] = None, token: Option
 	except Exception as e:
 		frappe.log_error(f"Get purchase orders failed for vendor {vendor}: {str(e)}")
 		frappe.throw(_("Failed to retrieve purchase orders"), frappe.PermissionError)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Webhook delivery with HMAC-SHA256 signature verification
+# ─────────────────────────────────────────────────────────────────────────────
+
+import hmac
+import hashlib
+import json as _json
+
+
+def send_webhook(vendor: str, event: str, payload: Dict[str, Any]) -> bool:
+	"""
+	Send a signed webhook to the vendor's registered endpoint.
+
+	The request includes an `X-Webhook-Signature` header containing an
+	HMAC-SHA256 digest of the raw JSON body, keyed with the vendor's
+	`webhook_secret`.  Recipients should verify this signature before
+	processing the payload:
+
+	    import hmac, hashlib
+	    expected = hmac.new(secret.encode(), body_bytes, hashlib.sha256).hexdigest()
+	    assert hmac.compare_digest(expected, request.headers['X-Webhook-Signature'])
+
+	Frappe's built-in API key/secret auth (User > API Access) is an
+	alternative for server-to-server calls where the vendor can make
+	authenticated requests directly to /api/method/... using the
+	Authorization: token <api_key>:<api_secret> header.
+	"""
+	import requests as _requests
+
+	try:
+		vendor_doc = frappe.db.get_value(
+			'Vendor',
+			vendor,
+			['webhook_url', 'webhook_secret'],
+			as_dict=True
+		)
+
+		if not vendor_doc or not vendor_doc.get('webhook_url'):
+			frappe.logger().warning(f"No webhook URL configured for vendor {vendor}")
+			return False
+
+		webhook_url = vendor_doc['webhook_url']
+		webhook_secret = vendor_doc.get('webhook_secret') or ''
+
+		# Build payload envelope
+		envelope = {
+			'event': event,
+			'vendor': vendor,
+			'timestamp': time.time(),
+			'data': payload
+		}
+
+		body_bytes = _json.dumps(envelope, separators=(',', ':')).encode('utf-8')
+
+		# Compute HMAC-SHA256 signature
+		signature = hmac.new(
+			webhook_secret.encode('utf-8'),
+			body_bytes,
+			hashlib.sha256
+		).hexdigest()
+
+		headers = {
+			'Content-Type': 'application/json',
+			'X-Webhook-Event': event,
+			'X-Webhook-Signature': signature,
+			'X-Webhook-Timestamp': str(int(time.time())),
+		}
+
+		response = _requests.post(
+			webhook_url,
+			data=body_bytes,
+			headers=headers,
+			timeout=10
+		)
+		response.raise_for_status()
+
+		frappe.logger().info(
+			f"Webhook '{event}' delivered to vendor {vendor} "
+			f"(status {response.status_code})"
+		)
+		return True
+
+	except Exception as exc:
+		frappe.log_error(
+			f"Webhook delivery failed for vendor {vendor}, event '{event}': {exc}"
+		)
+		return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Frappe built-in API key/secret auth — alternative to token-based auth
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Frappe supports API key/secret authentication natively via the User doctype
+# (User > API Access section).  Vendors can authenticate server-to-server
+# requests without a session token by passing:
+#
+#   Authorization: token <api_key>:<api_secret>
+#
+# Example:
+#   curl -H "Authorization: token abc123:xyz789" \
+#        https://erp.example.com/api/method/vendor_portal.api.vendor.get_purchase_orders
+#
+# To generate keys programmatically:
+#
+#   user = frappe.get_doc('User', 'vendor@example.com')
+#   api_key = frappe.generate_hash(length=15)
+#   api_secret = frappe.generate_hash(length=15)
+#   user.api_key = api_key
+#   user.api_secret = api_secret
+#   user.save(ignore_permissions=True)
+#
+# This approach leverages Frappe's built-in session management and avoids
+# maintaining a separate token cache.

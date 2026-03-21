@@ -149,3 +149,73 @@ def update_payment_statistics(doc):
 				'total_payments': stats[0].payment_count,
 				'total_paid_amount': stats[0].total_paid
 			}, update_modified=False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# on_trash / after_delete hooks
+# ─────────────────────────────────────────────────────────────────────────────
+
+def on_sales_order_trash(doc, method):
+	"""
+	Called just before a document is permanently deleted (after cancel).
+	Use this to clean up related records or log the deletion.
+	Note: doc.name is still available here.
+	"""
+	# Archive or log the deletion for audit purposes
+	frappe.get_doc({
+		'doctype': 'Activity Log',
+		'subject': _('Sales Order {0} deleted').format(doc.name),
+		'content': _('Deleted by {0}').format(frappe.session.user),
+		'reference_doctype': doc.doctype,
+		'reference_name': doc.name,
+		'user': frappe.session.user
+	}).insert(ignore_permissions=True)
+
+
+def after_sales_order_delete(doc, method):
+	"""
+	Called after the document has been deleted from the database.
+	doc.name is still accessible but the record no longer exists in DB.
+	Use this for post-deletion side effects (e.g. clearing caches).
+	"""
+	frappe.cache().delete_key(f"sales_order_summary_{doc.name}")
+
+
+# Register these in hooks.py:
+# doc_events = {
+#     "Sales Order": {
+#         "on_trash": "your_app.events.on_sales_order_trash",
+#         "after_delete": "your_app.events.after_sales_order_delete",
+#     }
+# }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# frappe.flags.in_import — Skip validation during data import
+# ─────────────────────────────────────────────────────────────────────────────
+
+def validate_sales_order_strict(doc, method):
+	"""
+	Validation hook that is intentionally skipped during data import.
+
+	When importing data via the Data Import tool or bench fixtures,
+	frappe.flags.in_import is set to True. Use this flag to bypass
+	expensive or context-sensitive validations that would otherwise
+	block a clean import.
+	"""
+	# Skip heavy validation during bulk data import
+	if frappe.flags.in_import:
+		return
+
+	# Also skip during automated testing when explicitly requested
+	if frappe.flags.in_test and frappe.flags.ignore_validate:
+		return
+
+	# Normal validation logic below
+	if doc.customer and doc.grand_total:
+		check_customer_credit_limit(doc)
+
+	if doc.delivery_date and doc.transaction_date:
+		from frappe.utils import getdate
+		if getdate(doc.delivery_date) < getdate(doc.transaction_date):
+			frappe.throw(_("Delivery date cannot be before transaction date"))

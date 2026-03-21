@@ -1794,3 +1794,81 @@ Client-side mastery is crucial for creating responsive Frappe applications:
 ---
 
 **Next Chapter**: Server script hooks and automation with schedulers.
+
+
+---
+
+## 📌 Addendum: frappe.ui.form.on vs frappe.provide, and Error Callbacks
+
+### frappe.ui.form.on (Recommended — v14/v15)
+
+`frappe.ui.form.on` is the standard event registration API in Frappe v14 and v15.  It is declarative, supports multiple handlers for the same event, and works correctly with Frappe's form lifecycle.
+
+```javascript
+frappe.ui.form.on('Sales Order', {
+    // Fires when the form is refreshed (including on load)
+    refresh(frm) {
+        if (frm.doc.docstatus === 1) {
+            frm.add_custom_button(__('Create Invoice'), () => {
+                frappe.model.open_mapped_doc({
+                    method: 'erpnext.selling.doctype.sales_order.sales_order.make_sales_invoice',
+                    frm: frm
+                });
+            });
+        }
+    },
+
+    // Fires when the customer field value changes
+    customer(frm) {
+        if (!frm.doc.customer) return;
+        frm.set_query('contact_person', () => ({
+            filters: { link_doctype: 'Customer', link_name: frm.doc.customer }
+        }));
+    },
+
+    // Child table field event — item_code changed in the items table
+    'items.item_code'(frm, cdt, cdn) {
+        const row = locals[cdt][cdn];
+        if (row.item_code) {
+            frappe.db.get_value('Item', row.item_code, 'standard_rate', (r) => {
+                frappe.model.set_value(cdt, cdn, 'rate', r.standard_rate);
+            });
+        }
+    }
+});
+```
+
+### frappe.provide (Legacy — Avoid in New Code)
+
+The older `frappe.provide` / `cur_frm.cscript` pattern pre-dates `frappe.ui.form.on`.  You will encounter it in older customisations and ERPNext source code, but it should not be used in new development.
+
+```javascript
+// ❌ Legacy — do not use in new code
+frappe.provide('frappe.ui.form.cscript');
+frappe.ui.form.cscript['Sales Order'] = class extends frappe.ui.form.cscript['Sales Order'] {
+    customer(doc, cdt, cdn) {
+        // ...
+    }
+};
+```
+
+### Always Add an error Callback for Critical API Calls
+
+See `client_scripts/api_calls.js` — Examples 7–9 — for complete patterns including the `error` callback.  The `error` callback receives the raw XHR response object; `r.exc` contains the server traceback in developer mode.
+
+```javascript
+frappe.call({
+    method: 'my_app.api.do_something',
+    args: { name: frm.doc.name },
+    callback(r) {
+        if (r.message) frappe.show_alert('Done');
+    },
+    error(r) {
+        frappe.msgprint({
+            title: __('Error'),
+            message: __('Operation failed. Please check error logs.'),
+            indicator: 'red'
+        });
+    }
+});
+```

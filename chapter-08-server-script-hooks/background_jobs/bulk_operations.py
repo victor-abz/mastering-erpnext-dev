@@ -11,7 +11,7 @@ from frappe import _
 def bulk_update_item_prices(price_list, percentage_change):
 	"""Update all item prices in a price list by percentage"""
 	frappe.enqueue(
-		'chapter_08.background_jobs.bulk_operations._bulk_update_prices',
+		'chapter_08_server_script_hooks.background_jobs.bulk_operations._bulk_update_prices',
 		price_list=price_list,
 		percentage_change=percentage_change,
 		queue='long',
@@ -61,7 +61,7 @@ def _bulk_update_prices(price_list, percentage_change):
 def generate_monthly_reports(month, year):
 	"""Generate monthly reports in background"""
 	frappe.enqueue(
-		'chapter_08.background_jobs.bulk_operations._generate_reports',
+		'chapter_08_server_script_hooks.background_jobs.bulk_operations._generate_reports',
 		month=month,
 		year=year,
 		queue='long',

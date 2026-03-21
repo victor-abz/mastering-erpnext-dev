@@ -97,3 +97,98 @@ sudo -u $BENCH_USER bench --site $SITE_NAME enable-scheduler
 echo "=== Production setup complete ==="
 echo "Site: $SITE_NAME"
 echo "Admin password saved in: $BENCH_PATH/sites/$SITE_NAME/site_config.json"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# bench update — risks and safe update procedure
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# `bench update` pulls the latest code for all apps, runs migrations, and
+# restarts services.  Key risks:
+#
+#   1. Breaking schema migrations — always test on staging first.
+#   2. Dependency conflicts — new app versions may require different Python
+#      packages; check requirements.txt diffs before updating.
+#   3. Custom patches may conflict with upstream patches.
+#   4. Downtime — `bench update` restarts workers; schedule during low-traffic.
+#
+# Safe update workflow:
+#   bench --site staging.local backup          # backup staging first
+#   bench update --no-backup --reset           # test on staging
+#   bench --site staging.local migrate
+#   # Verify staging, then repeat on production:
+#   bench --site $SITE_NAME backup
+#   bench update
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# Database backup strategy
+# ─────────────────────────────────────────────────────────────────────────────
+
+backup_site() {
+    local SITE="$1"
+    local BACKUP_DIR="$BENCH_PATH/sites/backups"
+    local TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
+    echo "Creating backup for $SITE..."
+
+    # Create compressed SQL + files backup
+    sudo -u $BENCH_USER bench --site "$SITE" backup \
+        --with-files \
+        --compress
+
+    echo "Backup created in $BACKUP_DIR"
+
+    # Optional: push to S3 (requires awscli configured)
+    # aws s3 sync "$BACKUP_DIR" "s3://your-bucket/frappe-backups/$SITE/" \
+    #     --exclude "*" \
+    #     --include "*.sql.gz" \
+    #     --include "*.tar.gz"
+
+    # Optional: push to GCS
+    # gsutil -m rsync -r "$BACKUP_DIR" "gs://your-bucket/frappe-backups/$SITE/"
+}
+
+# Schedule daily backups via cron (add to frappe user's crontab):
+# 0 2 * * * /home/frappe/frappe-bench/env/bin/bench --site <site> backup --with-files --compress
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rollback mechanism
+# ─────────────────────────────────────────────────────────────────────────────
+
+rollback_deployment() {
+    local SITE="$1"
+    local BACKUP_FILE="$2"   # path to .sql.gz backup file
+
+    if [ -z "$BACKUP_FILE" ] || [ ! -f "$BACKUP_FILE" ]; then
+        echo "ERROR: Provide a valid backup file path as the second argument."
+        exit 1
+    fi
+
+    echo "=== Rolling back $SITE to $BACKUP_FILE ==="
+
+    # 1. Enable maintenance mode to block incoming requests
+    sudo -u $BENCH_USER bench --site "$SITE" set-maintenance-mode on
+
+    # 2. Restore database from backup
+    sudo -u $BENCH_USER bench --site "$SITE" restore "$BACKUP_FILE"
+
+    # 3. Revert app code to the previous git tag/commit
+    #    (assumes you tagged the release before updating)
+    # cd $BENCH_PATH/apps/erpnext && git checkout <previous-tag>
+    # cd $BENCH_PATH/apps/frappe  && git checkout <previous-tag>
+
+    # 4. Rebuild assets for the restored version
+    sudo -u $BENCH_USER bench build
+
+    # 5. Restart services
+    sudo supervisorctl restart all
+
+    # 6. Disable maintenance mode
+    sudo -u $BENCH_USER bench --site "$SITE" set-maintenance-mode off
+
+    echo "=== Rollback complete for $SITE ==="
+}
+
+# Usage:
+#   bash production_setup.sh <site-name>          # initial setup
+#   source production_setup.sh && backup_site <site-name>
+#   source production_setup.sh && rollback_deployment <site-name> /path/to/backup.sql.gz

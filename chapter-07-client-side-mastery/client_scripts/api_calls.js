@@ -158,3 +158,80 @@ async function update_multiple_records(records) {
 	
 	frappe.show_alert(__('All records updated'), 5);
 }
+
+// Example 7: frappe.ui.form.on Pattern (Recommended Modern Approach)
+// Use frappe.ui.form.on instead of the older cur_frm.cscript pattern.
+// frappe.ui.form.on is event-driven, supports multiple handlers, and is
+// the standard in Frappe v14/v15.
+frappe.ui.form.on('Sales Order', {
+	customer: function(frm) {
+		// Triggered when the customer field changes
+		if (frm.doc.customer) {
+			frappe.call({
+				method: 'frappe.client.get_value',
+				args: {
+					doctype: 'Customer',
+					filters: { name: frm.doc.customer },
+					fieldname: ['credit_limit', 'customer_group']
+				},
+				callback: function(r) {
+					if (r.message) {
+						frm.set_value('credit_limit', r.message.credit_limit);
+					}
+				},
+				// Always add an error callback for production code
+				error: function(r) {
+					frappe.msgprint({
+						title: __('Error'),
+						message: __('Could not fetch customer details. Please try again.'),
+						indicator: 'red'
+					});
+					console.error('Customer fetch error:', r);
+				}
+			});
+		}
+	},
+
+	refresh: function(frm) {
+		// Triggered on every form refresh
+		frm.set_intro(__('Review items before submitting.'), 'blue');
+	}
+});
+
+// Example 8: frappe.provide (Legacy Pattern — Avoid in New Code)
+// The older frappe.provide / cur_frm.cscript approach is still functional
+// but is considered legacy. Shown here for reference when maintaining
+// older customizations.
+//
+// frappe.provide('frappe.ui.form.cscript');
+// frappe.ui.form.cscript['Sales Order'] = frappe.ui.form.cscript['Sales Order'] || {};
+// frappe.ui.form.cscript['Sales Order'].customer = function(doc, cdt, cdn) {
+//     // Legacy handler — prefer frappe.ui.form.on above
+// };
+
+// Example 9: Explicit error callback pattern
+// Always include an error callback when the result is critical to UX.
+function submit_custom_action(doc_name) {
+	frappe.call({
+		method: 'custom_app.api.perform_action',
+		args: { name: doc_name },
+		freeze: true,
+		freeze_message: __('Processing...'),
+		callback: function(r) {
+			if (r.message && r.message.success) {
+				frappe.show_alert({ message: __('Action completed'), indicator: 'green' });
+				cur_frm.reload_doc();
+			}
+		},
+		error: function(r) {
+			// r.exc contains the server-side traceback (in developer mode)
+			frappe.msgprint({
+				title: __('Action Failed'),
+				message: r.exc
+					? __('Server error occurred. Check error logs.')
+					: __('An unexpected error occurred.'),
+				indicator: 'red'
+			});
+		}
+	});
+}

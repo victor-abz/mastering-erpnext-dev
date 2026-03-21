@@ -121,3 +121,6 @@ projects/*/backups/
 .env.development
 .env.test
 .env.production
+
+# frappe_docker has its own git repo
+frappe_docker/

@@ -442,3 +442,40 @@ This approach dramatically reduces development time and ensures consistency acro
 ---
 
 **Next Chapter**: Setting up your professional development environment with Bench.
+
+
+---
+
+## 📌 Addendum: Version Compatibility & ORM Limitations
+
+### Frappe v13 → v14/v15 Breaking Changes
+
+| Area | v13 Behaviour | v14/v15 Change |
+|------|--------------|----------------|
+| `frappe.get_user_companies()` | Built-in helper | **Removed** — query `User Permission` directly |
+| `frappe.db.escape()` | Available | Still available but prefer parameterised queries |
+| `setup.py` packaging | Required | **Deprecated** in v15 — use `pyproject.toml` |
+| `frappe.utils.time.time_in_seconds()` | Available | Prefer `time.time()` from stdlib |
+| `frappe.db.sql_list()` | Available | Replaced by `frappe.db.get_all(..., pluck='name')` |
+| Background job `now=True` kwarg | Runs inline | Still works but prefer `enqueue_after_commit` |
+| `frappe.local.request_ip` | Available | Use `frappe.local.request.remote_addr` in v15 |
+
+### Frappe ORM vs Django ORM / SQLAlchemy
+
+Frappe's ORM is purpose-built for business document management and differs from general-purpose ORMs in important ways:
+
+**What Frappe ORM does well:**
+- Automatic schema migration via `bench migrate` — no manual Alembic/Django migrations
+- Built-in audit trail, versioning, and soft-delete on every DocType
+- Permission-aware queries — `frappe.get_all()` automatically applies role/user permissions
+- Child table (one-to-many) handling is first-class
+
+**Frappe ORM limitations vs Django ORM / SQLAlchemy:**
+- No lazy loading — child tables are always fetched eagerly with `frappe.get_doc()`
+- No query chaining — you cannot compose `frappe.get_all()` calls like Django's `QuerySet`
+- N+1 risk is real: iterating a list and calling `frappe.get_doc()` per row is expensive; use `frappe.db.get_all()` with explicit `fields` instead
+- No database-level foreign key constraints — referential integrity is enforced in Python
+- Complex aggregations require raw `frappe.db.sql()` — the ORM has no `annotate()`/`aggregate()` equivalent
+- Schema changes outside Frappe (e.g. direct `ALTER TABLE`) are not tracked and can break `bench migrate`
+
+**Rule of thumb:** Use `frappe.get_all()` for lists, `frappe.db.get_value()` for single lookups, and `frappe.db.sql()` only when the ORM cannot express the query efficiently.

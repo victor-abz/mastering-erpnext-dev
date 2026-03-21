@@ -818,3 +818,56 @@ Server hooks and schedulers provide powerful automation capabilities:
 ---
 
 **Next Chapter**: Understanding and implementing the permissions system.
+
+
+---
+
+## 📌 Addendum: on_trash, after_delete, and frappe.flags.in_import
+
+### on_trash and after_delete Hooks
+
+Two hooks fire around document deletion that are often overlooked:
+
+| Hook | When it fires | doc.name available? | DB record exists? |
+|------|--------------|--------------------|--------------------|
+| `on_trash` | Just **before** the document is deleted | ✅ Yes | ✅ Yes |
+| `after_delete` | Just **after** the document is deleted | ✅ Yes | ❌ No |
+
+Use `on_trash` to clean up related records or create audit entries.  Use `after_delete` for post-deletion side effects like cache invalidation.
+
+Register them in `hooks.py`:
+
+```python
+doc_events = {
+    "Sales Order": {
+        "on_trash": "your_app.events.on_sales_order_trash",
+        "after_delete": "your_app.events.after_sales_order_delete",
+    }
+}
+```
+
+See `hooks_examples/document_events.py` for complete implementations.
+
+### frappe.flags.in_import — Skip Validation During Data Import
+
+When importing data via the **Data Import** tool or `bench execute`, Frappe sets `frappe.flags.in_import = True`.  Use this flag to bypass validations that are context-sensitive or would block a clean bulk import:
+
+```python
+def validate(doc, method):
+    # Skip expensive or context-sensitive checks during bulk import
+    if frappe.flags.in_import:
+        return
+
+    # Normal validation
+    check_customer_credit_limit(doc)
+```
+
+Common flags to be aware of:
+
+| Flag | Set by | Purpose |
+|------|--------|---------|
+| `frappe.flags.in_import` | Data Import tool | Skip import-blocking validations |
+| `frappe.flags.in_test` | Test runner | Indicate test context |
+| `frappe.flags.ignore_permissions` | Tests / migrations | Bypass permission checks |
+| `frappe.flags.in_patch` | `bench migrate` patches | Skip hooks during schema patches |
+| `frappe.flags.in_install` | App installation | Skip hooks during initial setup |
