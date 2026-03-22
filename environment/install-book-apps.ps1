@@ -42,6 +42,10 @@ Write-Host "==> Fixing file ownership..."
 docker exec -u root $Container bash -c "chown -R frappe:frappe /home/frappe/frappe-bench/apps/asset_management_app /home/frappe/frappe-bench/apps/production_planning_app /home/frappe/frappe-bench/apps/vendor_portal_app"
 
 # ── 3. Add apps directory to Python path ───────────────────
+# NOTE: This .pth file is lost on container restart.
+# Re-run this script or run: docker exec <container> bash -c
+# "echo '/home/frappe/frappe-bench/apps' > /home/frappe/frappe-bench/env/lib/python3.14/site-packages/frappe_apps.pth"
+# then restart the backend container.
 Write-Host ""
 Write-Host "==> Registering apps on Python path..."
 docker exec $Container bash -c "echo '/home/frappe/frappe-bench/apps' > /home/frappe/frappe-bench/env/lib/python3.14/site-packages/frappe_apps.pth"
