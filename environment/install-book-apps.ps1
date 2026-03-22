@@ -36,7 +36,17 @@ foreach ($App in $Apps.Keys) {
     docker cp "$Src" "${Container}:/home/frappe/frappe-bench/apps/$App"
 }
 
-# ── 2. pip-install each app (editable) ─────────────────────
+# ── 2. Fix ownership (docker cp copies as root) ────────────
+Write-Host ""
+Write-Host "==> Fixing file ownership..."
+docker exec -u root $Container bash -c "chown -R frappe:frappe /home/frappe/frappe-bench/apps/asset_management_app /home/frappe/frappe-bench/apps/production_planning_app /home/frappe/frappe-bench/apps/vendor_portal_app"
+
+# ── 3. Add apps directory to Python path ───────────────────
+Write-Host ""
+Write-Host "==> Registering apps on Python path..."
+docker exec $Container bash -c "echo '/home/frappe/frappe-bench/apps' > /home/frappe/frappe-bench/env/lib/python3.14/site-packages/frappe_apps.pth"
+
+# ── 4. pip-install each app (editable) ─────────────────────
 Write-Host ""
 Write-Host "==> Installing apps into bench Python environment..."
 
