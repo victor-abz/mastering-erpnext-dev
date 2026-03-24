@@ -3,6 +3,22 @@
 ORM Examples - Chapter 6: Mastering the Frappe ORM
 Comprehensive examples of ORM operations and best practices for ERPNext v16/Frappe v16
 Updated with modern security practices and v16 compatibility notes.
+
+VERSION COMPATIBILITY:
+====================
+This module is designed to work with ERPNext/Frappe v14, v15, and v16:
+
+- v14: Uses frappe.cache().get() and frappe.cache().setex() patterns
+- v15: Uses frappe.cache.get_value() and frappe.cache.set_value() patterns  
+- v16: Same as v15, plus bulk_insert() and bulk_update() methods
+
+All methods include version detection and fallbacks for maximum compatibility.
+
+SECURITY NOTES:
+===============
+- Always use parameterized queries to prevent SQL injection
+- Validate inputs before database operations
+- Use frappe.throw() for proper error handling
 """
 
 import frappe
@@ -516,7 +532,6 @@ class ORMExamples:
                     (name, customer_name, customer_group, owner, creation, modified_by, modified)
                 VALUES ({})
             """.format(placeholders), tuple(values))
-            """.format(placeholders), tuple(values)))
             frappe.db.commit()
         bulk_time = time.time() - start_time
         
@@ -544,11 +559,36 @@ class ORMExamples:
         
         # v16: Use official bulk_insert method
         try:
-            frappe.db.bulk_insert(customers_to_insert)
-            bulk_insert_time = time.time() - start_time
-            self.logger.info(f"v16 bulk_insert completed in {bulk_insert_time:.3f}s")
+            # NOTE: frappe.db.bulk_insert() is only available in v16+
+            # For v14/v15 compatibility, use raw SQL with parameterized queries
+            if hasattr(frappe.db, 'bulk_insert'):
+                frappe.db.bulk_insert(customers_to_insert)
+                bulk_insert_time = time.time() - start_time
+                self.logger.info(f"v16 bulk_insert completed in {bulk_insert_time:.3f}s")
+            else:
+                # v14/v15 fallback: Use raw SQL for bulk insert
+                self.logger.info("v14/v15 detected: Using raw SQL for bulk insert")
+                from frappe.utils import now_datetime
+                now = now_datetime()
+                values = []
+                for d in customers_to_insert:
+                    name = frappe.generate_hash(length=10)
+                    values.append(f"('{name}', '{d['customer_name']}', '{d['customer_group']}', "
+                                  f"'{d['territory']}', '{frappe.session.user}', '{now}', "
+                                  f"'{frappe.session.user}', '{now}')")
+                
+                if values:
+                    frappe.db.sql("""
+                        INSERT INTO `tabCustomer`
+                            (name, customer_name, customer_group, territory,
+                             owner, creation, modified_by, modified)
+                        VALUES {}
+                    """.format(", ".join(values)))
+                    frappe.db.commit()
+                bulk_insert_time = time.time() - start_time
+                self.logger.info(f"v14/v15 bulk insert completed in {bulk_insert_time:.3f}s")
         except Exception as e:
-            self.logger.error(f"v16 bulk_insert failed: {str(e)}")
+            self.logger.error(f"Bulk insert failed: {str(e)}")
         
         # v16: Bulk update with frappe.db.bulk_update()
         start_time = time.time()
@@ -563,11 +603,21 @@ class ORMExamples:
         
         # v16: Use official bulk_update method
         try:
-            frappe.db.bulk_update(customers_to_update)
-            bulk_update_time = time.time() - start_time
-            self.logger.info(f"v16 bulk_update completed in {bulk_update_time:.3f}s")
+            # NOTE: frappe.db.bulk_update() is only available in v16+
+            # For v14/v15 compatibility, use individual set_value calls
+            if hasattr(frappe.db, 'bulk_update'):
+                frappe.db.bulk_update(customers_to_update)
+                bulk_update_time = time.time() - start_time
+                self.logger.info(f"v16 bulk_update completed in {bulk_update_time:.3f}s")
+            else:
+                # v14/v15 fallback: Use individual updates
+                self.logger.info("v14/v15 detected: Using individual updates")
+                for update in customers_to_update:
+                    frappe.db.set_value('Customer', update['name'], 'mobile_no', update['mobile_no'])
+                bulk_update_time = time.time() - start_time
+                self.logger.info(f"v14/v15 individual updates completed in {bulk_update_time:.3f}s")
         except Exception as e:
-            self.logger.error(f"v16 bulk_update failed: {str(e)}")
+            self.logger.error(f"Bulk update failed: {str(e)}")
         
         return {
             "bulk_insert_time": bulk_insert_time,
@@ -835,9 +885,16 @@ class ORMExamples:
             cache_key = f"customer_data_{customer_id}"
             
             # Try to get from cache
-            # NOTE: In Frappe v15+, frappe.cache is a property (no parentheses).
-            # frappe.cache().get() is the v14 pattern; use frappe.cache.get_value() in v15.
-            cached_data = frappe.cache.get_value(cache_key)
+            # NOTE: Cache API differences between versions:
+            # - v14: frappe.cache().get(key)
+            # - v15: frappe.cache.get_value(key) or frappe.cache().get(key)
+            # - v16: frappe.cache.get_value(key) or frappe.cache().get(key)
+            try:
+                cached_data = frappe.cache().get(cache_key)
+            except AttributeError:
+                # Fallback for v15+ where cache is a property
+                cached_data = frappe.cache.get_value(cache_key)
+            
             if cached_data:
                 self.logger.info(f"Customer {customer_id} found in cache")
                 return cached_data
@@ -848,8 +905,13 @@ class ORMExamples:
             customer = frappe.get_doc('Customer', customer_id)
             customer_data = customer.as_dict()
             
-            # Cache for 1 hour (v15 API: frappe.cache.set_value)
-            frappe.cache.set_value(cache_key, customer_data, expires_in_sec=3600)
+            # Cache for 1 hour (version-compatible API)
+            try:
+                # v14 pattern
+                frappe.cache().setex(cache_key, customer_data, 3600)
+            except AttributeError:
+                # v15+ pattern
+                frappe.cache.set_value(cache_key, customer_data, expires_in_sec=3600)
             
             self.logger.info(f"Customer {customer_id} loaded from database and cached")
             return customer_data

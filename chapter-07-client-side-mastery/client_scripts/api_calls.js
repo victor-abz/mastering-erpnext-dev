@@ -2,7 +2,23 @@
  * API Call Examples
  * Chapter 7: Client-Side Mastery
  * 
- * Demonstrates frappe.call() patterns
+ * Demonstrates frappe.call() patterns with version compatibility notes
+ * 
+ * VERSION COMPATIBILITY:
+ * ====================
+ * This module works with Frappe v14, v15, and v16:
+ * 
+ * - v14: Uses cur_frm.cscript pattern (legacy)
+ * - v15/v16: Uses frappe.ui.form.on pattern (modern)
+ * - All versions: frappe.call() API remains consistent
+ * 
+ * Best practice: Always use frappe.ui.form.on for new development
+ * 
+ * SECURITY NOTES:
+ * ===============
+ * - Always validate API responses
+ * - Include error callbacks for production code
+ * - Use frappe.whitelist() on server-side methods
  */
 
 // Example 1: Basic API Call
@@ -209,8 +225,9 @@ frappe.ui.form.on('Sales Order', {
 //     // Legacy handler — prefer frappe.ui.form.on above
 // };
 
-// Example 9: Explicit error callback pattern
+// Example 9: Modern form handling with version compatibility
 // Always include an error callback when the result is critical to UX.
+// NOTE: cur_frm is legacy pattern. Modern Frappe uses frm parameter in form events.
 function submit_custom_action(doc_name) {
 	frappe.call({
 		method: 'custom_app.api.perform_action',
@@ -220,7 +237,14 @@ function submit_custom_action(doc_name) {
 		callback: function(r) {
 			if (r.message && r.message.success) {
 				frappe.show_alert({ message: __('Action completed'), indicator: 'green' });
-				cur_frm.reload_doc();
+				// Modern approach: Use frm parameter in form events
+				// For standalone calls, check if cur_frm exists (legacy compatibility)
+				if (typeof cur_frm !== 'undefined') {
+					cur_frm.reload_doc();
+				} else {
+					// Alternative: reload current page
+					window.location.reload();
+				}
 			}
 		},
 		error: function(r) {

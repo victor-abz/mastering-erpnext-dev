@@ -5,6 +5,24 @@ Chapter 13: Vendor Portal - REST API Development
 
 Enhanced for ERPNext v16 with modern security practices,
 rate limiting, and comprehensive error handling.
+
+VERSION COMPATIBILITY:
+====================
+This API works with ERPNext/Frappe v14, v15, and v16:
+
+- v14: Uses frappe.cache().get() and frappe.cache().setex() patterns
+- v15/v16: Uses frappe.cache.get_value() and frappe.cache.set_value() patterns
+- All versions: frappe.call() and @frappe.whitelist() remain consistent
+
+Security features work across all versions with version-compatible cache handling.
+
+SECURITY ENHANCEMENTS:
+======================
+- Token-based authentication with 24-hour expiry
+- Rate limiting (100 calls/hour per vendor)
+- HMAC-SHA256 signed webhooks
+- Input validation and SQL injection prevention
+- Comprehensive error handling and logging
 """
 
 import frappe
@@ -23,8 +41,13 @@ def validate_api_token(token: str) -> Dict[str, Any]:
 	"""Validate API token and return vendor information"""
 	try:
 		# Token data is stored as a dict in cache (set by authenticate())
-		token_data = redis_cache.get(f"vendor_token:{token}")
-		token_data = frappe.cache().get(f"vendor_token:{token}")
+		# Version-compatible cache API
+		try:
+			# v14 pattern
+			token_data = frappe.cache().get(f"vendor_token:{token}")
+		except AttributeError:
+			# v15+ pattern
+			token_data = frappe.cache.get_value(f"vendor_token:{token}")
 		
 		if not token_data:
 			frappe.throw(_("Invalid or expired token"), frappe.AuthenticationError)
@@ -40,8 +63,13 @@ def validate_api_token(token: str) -> Dict[str, Any]:
 		)
 		
 		if not vendor:
-			# Remove invalid token from cache
-			frappe.cache().delete(f"vendor_token:{token}")
+			# Remove invalid token from cache (version-compatible)
+			try:
+				# v14 pattern
+				frappe.cache().delete(f"vendor_token:{token}")
+			except AttributeError:
+				# v15+ pattern
+				frappe.cache.delete_value(f"vendor_token:{token}")
 			frappe.throw(_("Vendor account not found or inactive"), frappe.AuthenticationError)
 		
 		return vendor
@@ -54,14 +82,25 @@ def rate_limit_check(vendor_name: str, action: str = 'api_call') -> None:
 	"""Implement rate limiting for API calls"""
 	try:
 		cache_key = f"rate_limit:{vendor_name}:{action}"
-		current_count = frappe.cache().get(cache_key) or 0
+		# Version-compatible cache API
+		try:
+			# v14 pattern
+			current_count = frappe.cache().get(cache_key) or 0
+		except AttributeError:
+			# v15+ pattern
+			current_count = frappe.cache.get_value(cache_key) or 0
 		
 		# Allow 100 calls per hour per vendor
 		if current_count >= 100:
 			frappe.throw(_("Rate limit exceeded. Please try again later."), frappe.PermissionError)
 		
-		# Increment counter with 1 hour expiry (v16: setex(key, ttl, value))
-		frappe.cache().setex(cache_key, 3600, current_count + 1)
+		# Increment counter with 1 hour expiry (version-compatible)
+		try:
+			# v14 pattern: setex(key, ttl, value)
+			frappe.cache().setex(cache_key, 3600, current_count + 1)
+		except AttributeError:
+			# v15+ pattern: set_value(key, value, expires_in_sec)
+			frappe.cache.set_value(cache_key, current_count + 1, expires_in_sec=3600)
 		
 	except Exception as e:
 		frappe.log_error(f"Rate limiting check failed: {str(e)}")
