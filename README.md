@@ -9,7 +9,7 @@ A comprehensive technical guide for developers who want to master Frappe Framewo
 
 ## What's Inside
 
-- **17 chapters** covering the full ERPNext development lifecycle
+- **21 chapters** covering the full ERPNext development lifecycle
 - **3 production-ready apps** — Asset Management, Production Planning, Vendor Portal
 - **34 passing tests** — unit, integration, E2E, and performance
 - **Fully compatible with ERPNext v16 / Frappe v16**
@@ -82,6 +82,10 @@ mastering-erpnext-dev/
 ├── chapter-15-automated-testing/   # 34 test cases
 ├── chapter-16-performance-tuning/
 ├── chapter-17-production-pipeline/
+├── chapter-18-hooks-deep-dive/
+├── chapter-19-workflows/
+├── chapter-20-translations-i18n/
+├── chapter-21-virtual-doctypes/
 │
 └── projects/
     ├── asset_management/           # Asset Management app
@@ -173,6 +177,10 @@ All code has been updated and verified against **ERPNext v16.9.1 / Frappe v16.11
 | 15 | Automated Testing | Unit, integration, E2E, performance tests |
 | 16 | Performance Tuning | Query optimization, caching, benchmarks |
 | 17 | Production Pipeline | GitHub Actions CI/CD, health checks, deployment |
+| 18 | Hooks Deep Dive | Hook theory, all hook types, custom hook types |
+| 19 | Workflows | States, transitions, docstatus, JS/Python APIs |
+| 20 | Translations & i18n | CSV translation files, `_()`, context, language codes |
+| 21 | Virtual DocTypes | Virtual DocTypes, Virtual Fields, external backends |
 
 ---
 
