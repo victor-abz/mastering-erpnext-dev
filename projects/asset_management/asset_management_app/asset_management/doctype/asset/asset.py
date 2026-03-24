@@ -160,14 +160,19 @@ class Asset(Document):
 
 		purchase_amount = flt(self.purchase_amount)
 		salvage_value = flt(getattr(self, 'salvage_value', None) or 0)
+		# Depreciable amount is the portion of asset value that can be depreciated
+		# This excludes salvage value which is recovered at end of asset life
 		depreciable_amount = purchase_amount - salvage_value
 
 		method = getattr(self, 'depreciation_method', None)
 		useful_life = flt(getattr(self, 'useful_life', None) or 0)
 
 		if method == 'Straight Line' and useful_life > 0:
+			# Calculate days elapsed since asset purchase
 			days_since_purchase = (getdate(today()) - getdate(self.purchase_date)).days
+			# Annual depreciation is equal amount each year
 			annual_depreciation = depreciable_amount / useful_life
+			# Pro-rate for partial years based on days elapsed
 			raw = (annual_depreciation * days_since_purchase) / 365
 			# Cap at depreciable amount (never depreciate below salvage value)
 			self.accumulated_depreciation = min(raw, depreciable_amount)
@@ -175,8 +180,12 @@ class Asset(Document):
 		elif method == 'Written Down Value':
 			rate = flt(getattr(self, 'depreciation_rate', None) or 0)
 			if rate > 0:
+				# Calculate fractional years for more precise WDV calculation
 				years = (getdate(today()) - getdate(self.purchase_date)).days / 365
+				# WDV formula: Current Value = Purchase Amount × (1 - rate/100)^years
+				# This creates exponential decay where depreciation amount decreases each year
 				current = purchase_amount * ((1 - rate / 100) ** years)
+				# Accumulated depreciation is the difference between original and current value
 				self.accumulated_depreciation = min(
 					purchase_amount - current,
 					purchase_amount  # never exceed purchase amount
@@ -186,7 +195,10 @@ class Asset(Document):
 		"""Calculate current asset value, floored at salvage_value"""
 		if self.purchase_amount:
 			salvage_value = flt(getattr(self, 'salvage_value', None) or 0)
+			# Current value is original cost minus accumulated depreciation
 			raw = flt(self.purchase_amount) - flt(self.accumulated_depreciation or 0)
+			# Ensure current value never falls below salvage value
+			# This protects against over-depreciation and ensures minimum recovery value
 			self.current_value = max(raw, salvage_value)
 
 	def on_trash(self):

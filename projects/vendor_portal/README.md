@@ -88,6 +88,44 @@ Authorization: Bearer {token}
 Parameters:
 - `purchase_order`: PO ID (required)
 
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "name": "PO-0001",
+    "transaction_date": "2026-03-01",
+    "schedule_date": "2026-03-15",
+    "grand_total": 50000,
+    "base_grand_total": 50000,
+    "currency": "USD",
+    "status": "To Receive",
+    "supplier": "VENDOR-001",
+    "items": [
+      {
+        "item_code": "ITEM-001",
+        "item_name": "Raw Material A",
+        "qty": 10,
+        "rate": 5000,
+        "amount": 50000
+      }
+    ],
+    "terms_and_conditions": "Payment due within 30 days",
+    "acknowledgement_date": null,
+    "acknowledgement_notes": null
+  }
+}
+```
+
+Error Response:
+```json
+{
+  "success": false,
+  "error": "Purchase Order not found or access denied",
+  "exc_type": "PermissionError"
+}
+```
+
 ### Acknowledge Purchase Order
 
 **POST** `/api/method/vendor_portal_app.vendor_portal.api.purchase_order.acknowledge_purchase_order`
@@ -95,6 +133,7 @@ Parameters:
 Headers:
 ```
 Authorization: Bearer {token}
+Content-Type: application/json
 ```
 
 Request:
@@ -103,6 +142,29 @@ Request:
   "purchase_order": "PO-0001",
   "acknowledgement_date": "2026-03-12",
   "notes": "Order received and processing"
+}
+```
+
+Success Response:
+```json
+{
+  "success": true,
+  "message": "Purchase Order acknowledged successfully",
+  "data": {
+    "name": "PO-0001",
+    "acknowledgement_date": "2026-03-12",
+    "acknowledgement_notes": "Order received and processing",
+    "status": "To Receive"
+  }
+}
+```
+
+Error Response:
+```json
+{
+  "success": false,
+  "error": "Access denied: Vendor mismatch",
+  "exc_type": "PermissionError"
 }
 ```
 

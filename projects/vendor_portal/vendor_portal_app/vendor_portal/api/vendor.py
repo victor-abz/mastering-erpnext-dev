@@ -41,21 +41,23 @@ def validate_api_token(token: str) -> Dict[str, Any]:
 	"""Validate API token and return vendor information"""
 	try:
 		# Token data is stored as a dict in cache (set by authenticate())
+		# Format: {'vendor_name': 'VENDOR-001', 'vendor_email': 'vendor@example.com', 'created_at': '2026-03-12'}
 		# Version-compatible cache API
 		try:
-			# v14 pattern
+			# v14 pattern: frappe.cache() returns cache object
 			token_data = frappe.cache().get(f"vendor_token:{token}")
 		except AttributeError:
-			# v15+ pattern
+			# v15+ pattern: frappe.cache has static methods
 			token_data = frappe.cache.get_value(f"vendor_token:{token}")
 		
 		if not token_data:
 			frappe.throw(_("Invalid or expired token"), frappe.AuthenticationError)
 		
+		# Handle both dict format (from authenticate()) and string format (legacy)
 		# token_data is a dict: {'vendor_name': ..., 'vendor_email': ..., 'created_at': ...}
 		vendor_name = token_data.get('vendor_name') if isinstance(token_data, dict) else token_data
 		
-		# Verify vendor still exists and is active
+		# Verify vendor still exists and is active - prevents access to deactivated accounts
 		vendor = frappe.db.get_value('Vendor', 
 			{'name': vendor_name, 'status': 'Active'},
 			['name', 'vendor_name', 'email'],
@@ -63,7 +65,8 @@ def validate_api_token(token: str) -> Dict[str, Any]:
 		)
 		
 		if not vendor:
-			# Remove invalid token from cache (version-compatible)
+			# Remove invalid token from cache to prevent repeated failed lookups
+			# This is a security measure to invalidate tokens for deleted/deactivated vendors
 			try:
 				# v14 pattern
 				frappe.cache().delete(f"vendor_token:{token}")
@@ -81,22 +84,26 @@ def validate_api_token(token: str) -> Dict[str, Any]:
 def rate_limit_check(vendor_name: str, action: str = 'api_call') -> None:
 	"""Implement rate limiting for API calls"""
 	try:
+		# Create unique key for each vendor-action combination
+		# Example: rate_limit:VENDOR-001:get_purchase_orders
 		cache_key = f"rate_limit:{vendor_name}:{action}"
 		# Version-compatible cache API
 		try:
-			# v14 pattern
+			# v14 pattern: frappe.cache() returns cache object
 			current_count = frappe.cache().get(cache_key) or 0
 		except AttributeError:
-			# v15+ pattern
+			# v15+ pattern: frappe.cache has static methods
 			current_count = frappe.cache.get_value(cache_key) or 0
 		
-		# Allow 100 calls per hour per vendor
+		# Allow 100 calls per hour per vendor for each action type
+		# This prevents API abuse while allowing legitimate business operations
 		if current_count >= 100:
 			frappe.throw(_("Rate limit exceeded. Please try again later."), frappe.PermissionError)
 		
 		# Increment counter with 1 hour expiry (version-compatible)
+		# After 1 hour, the counter resets automatically
 		try:
-			# v14 pattern: setex(key, ttl, value)
+			# v14 pattern: setex(key, ttl, value) - sets value with expiration
 			frappe.cache().setex(cache_key, 3600, current_count + 1)
 		except AttributeError:
 			# v15+ pattern: set_value(key, value, expires_in_sec)
