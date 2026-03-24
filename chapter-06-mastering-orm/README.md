@@ -1549,3 +1549,610 @@ result = frappe.db.sql("""
     ORDER BY total DESC
 """, as_dict=True)
 ```
+
+
+---
+
+## 📌 Addendum: Frappe ORM — Complete Reference Guide (Parts 1 & 2)
+
+### The ORM Layers
+
+Frappe provides multiple layers for database access:
+- **Document ORM** — high-level object-oriented interface with hooks and validations
+- **Database Facade (`frappe.db`)** — convenience methods for common operations
+- **Query Builder (`frappe.qb`)** — type-safe, parameterized query construction
+- **Raw SQL** — direct SQL execution for advanced cases
+
+### Mental Model: How the ORM Maps to SQL
+
+- Every DocType becomes either `tab<DocType>` table (standard) or rows in `tabSingles` (Single DocTypes)
+- The `Document` class wraps a row, tracks dirty state, and coordinates hooks
+- `frappe.db` is injected per-request (`frappe.local.db`)
+
+### Create Operations
+
+#### `frappe.new_doc()` — Create a new Document object
+
+```python
+# Basic creation
+customer = frappe.new_doc("Customer")
+customer.customer_name = "Acme Corporation"
+customer.customer_type = "Company"
+customer.insert()
+
+# Create with initial values
+customer = frappe.new_doc(
+    "Customer",
+    customer_name="Acme Corporation",
+    customer_type="Company",
+    territory="North America"
+)
+customer.insert()
+
+# Create child table row
+sales_order = frappe.new_doc("Sales Order")
+sales_order.customer = "CUST-001"
+item = frappe.new_doc("Sales Order Item", parent_doc=sales_order, parentfield="items")
+item.item_code = "ITEM-001"
+item.qty = 10
+item.rate = 100
+sales_order.insert()
+
+# Create from dictionary
+sales_order = frappe.get_doc({
+    "doctype": "Sales Order",
+    "customer": "CUST-001",
+    "transaction_date": "2024-01-15",
+    "items": [
+        {"item_code": "ITEM-001", "qty": 10, "rate": 100},
+        {"item_code": "ITEM-002", "qty": 5, "rate": 200}
+    ]
+})
+sales_order.insert()
+```
+
+#### `Document.insert()` — Insert with full validation and hooks
+
+```python
+# Insert with custom name
+customer.insert(set_name="CUST-CUSTOM-001")
+
+# Insert ignoring permissions (use carefully — background jobs, migrations)
+customer.insert(ignore_permissions=True)
+
+# Insert ignoring link validation
+task.insert(ignore_links=True)
+
+# Insert ignoring mandatory fields
+customer.insert(ignore_mandatory=True)
+
+# Insert ignoring duplicates (returns existing doc if duplicate found)
+customer.insert(ignore_if_duplicate=True)
+```
+
+#### When to Use Which Method
+
+| Method | Use When | Hooks/Validations | Performance |
+|--------|----------|-------------------|-------------|
+| `frappe.new_doc().insert()` | Recommended for most cases | ✅ Full | Good |
+| `frappe.get_doc(dict).insert()` | Creating from API data | ✅ Full | Good |
+| Query Builder Insert | Programmatic query building | ❌ None | Excellent |
+| Raw SQL Insert | Migrations, system operations | ❌ None | Excellent |
+| `bulk_insert()` | Inserting thousands of rows | ❌ None | Best |
+
+### Read Operations
+
+#### `frappe.db.get_value()` — Fetch a single value or row
+
+```python
+# Get a single field
+customer_name = frappe.db.get_value("Customer", "CUST-001", "customer_name")
+
+# Get multiple fields as tuple
+name, email = frappe.db.get_value("User", "admin@example.com", ["full_name", "email"])
+
+# Get as dictionary
+user_data = frappe.db.get_value("User", "admin@example.com", "*", as_dict=True)
+
+# Get with complex filters
+task_name = frappe.db.get_value(
+    "Task",
+    {"status": "Open", "assigned_to": "user@example.com"},
+    "name",
+    order_by="creation desc"
+)
+
+# Get with operators
+customer = frappe.db.get_value(
+    "Customer",
+    {"creation": (">", "2024-01-01")},
+    "name",
+    as_dict=True
+)
+# Operators: ">", "<", ">=", "<=", "!=", "like", "not like", "in", "not in", "between"
+
+# Lock row for update (SELECT FOR UPDATE)
+balance = frappe.db.get_value("Account", "ACC-001", "balance", for_update=True)
+
+# Skip locked rows
+task = frappe.db.get_value(
+    "Task", {"status": "Pending"}, "name",
+    for_update=True, skip_locked=True, order_by="creation asc"
+)
+
+# Get from Single DocType
+date_format = frappe.db.get_value("System Settings", None, "date_format")
+
+# Cache result within request
+company = frappe.db.get_value("Company", "Main Company", "name", cache=True)
+```
+
+#### `frappe.db.get_values()` — Fetch multiple rows
+
+```python
+# Get multiple rows as list of tuples
+customers = frappe.db.get_values("Customer", {"status": "Active"}, ["name", "customer_name"])
+
+# Get as list of dicts
+tasks = frappe.db.get_values("Task", {"status": "Open"}, "*", as_dict=True, limit=10)
+
+# Pluck single column from multiple rows
+customer_names = frappe.db.get_values("Customer", {"status": "Active"}, "name", pluck=True)
+
+# Get distinct values
+statuses = frappe.db.get_values("Task", None, "status", distinct=True, pluck=True)
+```
+
+#### `frappe.get_all()` vs `frappe.get_list()`
+
+```python
+# get_all() — bypasses permissions (use with caution)
+customers = frappe.get_all("Customer", fields=["name", "customer_name"])
+
+# With pagination
+customers = frappe.get_all(
+    "Customer",
+    fields=["name", "customer_name"],
+    limit_start=20,
+    limit_page_length=20,
+    order_by="creation desc"
+)
+
+# With OR filters
+customers = frappe.get_all(
+    "Customer",
+    filters={"status": "Active"},
+    or_filters=[
+        {"customer_name": ("like", "%Corp%")},
+        {"territory": "North"}
+    ]
+)
+
+# Pluck single field
+names = frappe.get_all("Customer", pluck="name")
+# Returns: ["CUST-001", "CUST-002", ...]
+# Note: fields=["name"] returns [{"name": "CUST-001"}, ...] — different!
+
+# get_list() — respects permissions (use in user-facing code)
+tasks = frappe.get_list(
+    "Task",
+    fields=["name", "subject", "status"],
+    filters={"assigned_to": frappe.session.user},
+    limit_page_length=20
+)
+```
+
+**Key difference**: `get_all()` fetches all records regardless of user permissions. `get_list()` automatically checks `frappe.has_permission()` before returning results. Use `get_list()` in user-facing APIs, `get_all()` in background jobs and system operations.
+
+### Write Operations
+
+```python
+# set_value — update a single field (bypasses hooks)
+frappe.db.set_value("Task", task_id, {"status": "Completed"}, update_modified=False)
+frappe.db.commit()
+
+# set_single_value — update a Single DocType field
+frappe.db.set_single_value("System Settings", "date_format", "dd-mm-yyyy")
+
+# bulk_insert — insert thousands of rows efficiently
+fields = ["name", "subject", "status", "owner", "creation", "modified", "modified_by"]
+values = [
+    ("TASK-001", "Task 1", "Open", "admin@example.com", "2024-01-15 10:00:00", "2024-01-15 10:00:00", "admin@example.com"),
+    # ... thousands more
+]
+frappe.db.bulk_insert("Task", fields, values, chunk_size=10_000)
+
+# delete — delete with filters
+frappe.db.delete("Task", {"status": "Cancelled"})
+```
+
+### Query Builder (`frappe.qb`)
+
+```python
+from frappe.query_builder import Order
+
+Lead = frappe.qb.DocType("Lead")
+
+# Basic query
+query = (
+    frappe.qb.from_(Lead)
+    .select(Lead.name, Lead.company_name)
+    .where((Lead.status == "Open") & (Lead.modified >= "2024-01-01"))
+    .orderby(Lead.modified, order=Order.desc)
+    .limit(50)
+)
+rows = query.run(as_dict=True)
+
+# Aggregations
+from frappe.query_builder.functions import Count, Sum
+SalesOrder = frappe.qb.DocType("Sales Order")
+totals = (
+    frappe.qb.from_(SalesOrder)
+    .select(SalesOrder.name, SalesOrder.grand_total)
+    .where((SalesOrder.docstatus == 1) & (SalesOrder.modified >= "2024-01-01"))
+    .orderby(SalesOrder.modified, order=Order.desc)
+    .limit(100)
+).run(as_dict=True)
+
+# Locking
+query = (
+    frappe.qb.from_(Lead)
+    .select(Lead.name)
+    .where(Lead.status == "Open")
+    .for_update(skip_locked=True)
+)
+```
+
+### Transaction Management
+
+```python
+# Savepoints for nested operations
+frappe.db.savepoint("before_mass_update")
+try:
+    # perform writes
+    frappe.db.commit()
+except Exception:
+    frappe.db.rollback(save_point="before_mass_update")
+    raise
+
+# Chunked background migration
+while names := frappe.db.get_all("Invoice", filters={"migrated": 0}, pluck="name", limit=500):
+    frappe.db.set_value("Invoice", {"name": ("in", names)}, "migrated", 1)
+    frappe.db.commit()
+
+# Safe raw SQL with iterator (memory-efficient for large datasets)
+for row in frappe.db.sql(
+    "select name from tabEmail Queue where status=%s",
+    "Sent", as_dict=True, as_iterator=True
+):
+    process(row.name)
+```
+
+### Performance & Caching Tips
+
+- **Value cache**: request-level dict keyed by `(doctype, name, fieldname)` — used by `get_value`/`get_single_value`
+- **Redis cache**: use `frappe.cache` for cross-request caching
+- **Indexing**: add indexes on frequently filtered columns via DocType settings or `frappe.db.add_index`
+- **Batching**: use `SQL_ITERATOR_BATCH_SIZE` (1000) with `as_iterator=True` to stream large result sets
+- **Explain plan**: `frappe.db.sql(..., debug=True, explain=True)` prints EXPLAIN output
+
+### Schema Operations
+
+```python
+# Reload DocType schema from JSON
+frappe.reload_doc(module, "doctype", "DocTypeName")
+
+# Sync meta and handle column changes
+frappe.db.updatedb(doctype)
+
+# Schema introspection
+frappe.db.has_column("Customer", "custom_field")
+frappe.db.has_table("tabCustomer")
+frappe.db.describe("Customer")
+```
+
+### Learning Check
+
+1. When should you favor `frappe.qb` over raw SQL?
+2. What is the difference between `get_value` and `get_single_value`?
+3. How do `for_update`, `skip_locked`, and `wait=False` change locking behavior?
+4. How would you bulk update 100k rows without exhausting memory?
+5. Why can't you run `ALTER TABLE` mid-transaction when `transaction_writes > 0`?
+6. What is the difference between `frappe.get_all()` and `frappe.get_list()`?
+
+
+---
+
+## Addendum: Source Article Insights
+
+### Frappe ORM Architecture
+
+Frappe provides four layers for database access:
+
+| Layer | Use When | Hooks/Validation | Performance |
+|-------|---------|-----------------|-------------|
+| Document ORM (`frappe.get_doc`, `doc.insert()`) | Business logic, standard operations | ✅ Full | Good |
+| `frappe.db` convenience methods | Simple reads/writes | ❌ None | Good |
+| Query Builder (`frappe.qb`) | Complex queries, joins | ❌ None | Excellent |
+| Raw SQL (`frappe.db.sql`) | Migrations, analytics | ❌ None | Excellent |
+
+**Mental model:**
+- Every DocType → `tab{DocType}` table (or `tabSingles` for Single DocTypes)
+- `frappe.db` is injected per-request (`frappe.local.db`)
+- `frappe.qb` is PyPika-powered with MariaDB/Postgres dialect support
+
+---
+
+### Create Operations
+
+```python
+# Method 1: new_doc + insert (recommended — triggers all hooks)
+customer = frappe.new_doc("Customer")
+customer.customer_name = "Acme Corp"
+customer.customer_type = "Company"
+customer.insert()
+
+# Method 2: new_doc with kwargs
+customer = frappe.new_doc("Customer",
+    customer_name="Acme Corp",
+    customer_type="Company"
+)
+customer.insert()
+
+# Method 3: get_doc from dict
+customer = frappe.get_doc({
+    "doctype": "Customer",
+    "customer_name": "Acme Corp",
+    "customer_type": "Company"
+}).insert()
+
+# Method 4: with child tables
+sales_order = frappe.get_doc({
+    "doctype": "Sales Order",
+    "customer": "CUST-001",
+    "transaction_date": "2024-01-15",
+    "items": [
+        {"item_code": "ITEM-001", "qty": 10, "rate": 100},
+        {"item_code": "ITEM-002", "qty": 5, "rate": 200},
+    ]
+}).insert()
+
+# insert() options
+doc.insert(
+    ignore_permissions=True,   # Skip permission checks (migrations)
+    ignore_links=True,         # Skip link validation
+    ignore_if_duplicate=True,  # Return existing if duplicate
+    ignore_mandatory=True,     # Skip mandatory field checks
+    set_name="CUSTOM-001",     # Override auto-generated name
+)
+```
+
+---
+
+### Read Operations
+
+```python
+# get_value — single field or row
+customer_name = frappe.db.get_value("Customer", "CUST-001", "customer_name")
+name, email = frappe.db.get_value("User", "admin@example.com", ["full_name", "email"])
+user_data = frappe.db.get_value("User", "admin@example.com", "*", as_dict=True)
+
+# With filters and operators
+task = frappe.db.get_value(
+    "Task",
+    {"status": "Open", "assigned_to": frappe.session.user},
+    "name",
+    order_by="creation desc"
+)
+
+# Operators: ">", "<", ">=", "<=", "!=", "like", "in", "not in", "between", "is", "is not"
+customer = frappe.db.get_value("Customer", {"creation": (">", "2024-01-01")}, "name")
+
+# Lock row for concurrent update
+balance = frappe.db.get_value("Account", "ACC-001", "balance", for_update=True)
+
+# Skip locked rows (non-blocking)
+task = frappe.db.get_value("Task", {"status": "Pending"}, "name",
+    for_update=True, skip_locked=True, order_by="creation asc")
+
+# Single DocType
+date_format = frappe.db.get_value("System Settings", None, "date_format")
+
+# get_values — multiple rows
+customers = frappe.db.get_values("Customer", {"status": "Active"},
+    ["name", "customer_name"], as_dict=True, limit=10)
+
+# Pluck — flat list of one field
+names = frappe.db.get_values("Customer", {"status": "Active"}, "name", pluck=True)
+# Returns: ["CUST-001", "CUST-002", ...]
+
+# get_all — high-level, bypasses permissions
+customers = frappe.get_all("Customer",
+    fields=["name", "customer_name"],
+    filters={"status": "Active"},
+    order_by="creation desc",
+    limit_start=0,
+    limit_page_length=20
+)
+
+# pluck shortcut
+names = frappe.get_all("Customer", pluck="name")
+# Returns flat list: ["CUST-001", "CUST-002", ...]
+# vs fields=["name"] which returns: [{"name": "CUST-001"}, ...]
+
+# get_list — same as get_all but respects permissions
+tasks = frappe.get_list("Task",
+    fields=["name", "subject"],
+    filters={"assigned_to": frappe.session.user}
+)
+
+# OR filters
+customers = frappe.get_all("Customer",
+    filters={"status": "Active"},
+    or_filters=[
+        {"customer_name": ("like", "%Corp%")},
+        {"territory": "North"}
+    ]
+)
+
+# exists
+if frappe.db.exists("Customer", "CUST-001"):
+    # record exists
+
+# count
+total = frappe.db.count("Customer", {"status": "Active"})
+```
+
+---
+
+### Write Operations
+
+```python
+# set_value — update without loading full document
+frappe.db.set_value("Task", "TASK-001", "status", "Completed")
+frappe.db.set_value("Task", "TASK-001", {"status": "Completed", "priority": "High"})
+
+# Update without touching modified timestamp
+frappe.db.set_value("Task", task_id, {"status": "Completed"}, update_modified=False)
+frappe.db.commit()
+
+# db_set on document — update single field in place
+doc.db_set("status", "Completed")
+doc.db_set("status", "Completed", update_modified=False)
+
+# Single DocType
+frappe.db.set_single_value("System Settings", "date_format", "dd-mm-yyyy")
+
+# delete
+frappe.db.delete("Task", {"status": "Cancelled"})
+frappe.db.delete("Task", "TASK-001")  # By name
+
+# bulk_insert — efficient for large datasets
+fields = ["name", "subject", "status", "owner", "creation", "modified", "modified_by"]
+values = [
+    ("TASK-001", "Task 1", "Open", "admin@example.com", now, now, "admin@example.com"),
+    ("TASK-002", "Task 2", "Open", "admin@example.com", now, now, "admin@example.com"),
+]
+frappe.db.bulk_insert("Task", fields, values, chunk_size=10_000)
+```
+
+---
+
+### Query Builder
+
+```python
+from frappe.query_builder import Order
+from frappe.query_builder.functions import Count, Sum
+
+# Basic query
+Lead = frappe.qb.DocType("Lead")
+rows = (
+    frappe.qb.from_(Lead)
+    .select(Lead.name, Lead.company_name, Lead.status)
+    .where((Lead.status == "Open") & (Lead.modified >= "2024-01-01"))
+    .orderby(Lead.modified, order=Order.desc)
+    .limit(50)
+).run(as_dict=True)
+
+# Aggregations
+SalesOrder = frappe.qb.DocType("Sales Order")
+totals = (
+    frappe.qb.from_(SalesOrder)
+    .select(SalesOrder.customer, Sum(SalesOrder.grand_total).as_("total"))
+    .where(SalesOrder.docstatus == 1)
+    .groupby(SalesOrder.customer)
+    .orderby(Sum(SalesOrder.grand_total), order=Order.desc)
+    .limit(10)
+).run(as_dict=True)
+
+# Joins
+Customer = frappe.qb.DocType("Customer")
+Contact = frappe.qb.DocType("Contact")
+results = (
+    frappe.qb.from_(Customer)
+    .join(Contact).on(Contact.link_name == Customer.name)
+    .select(Customer.name, Customer.customer_name, Contact.email_id)
+    .where(Customer.status == "Active")
+).run(as_dict=True)
+
+# Locking
+item = (
+    frappe.qb.from_(Lead)
+    .select(Lead.name)
+    .where(Lead.status == "Pending")
+    .for_update(skip_locked=True)
+    .limit(1)
+).run(as_dict=True)
+```
+
+---
+
+### Transaction Management
+
+```python
+# Savepoints for nested operations
+frappe.db.savepoint("before_mass_update")
+try:
+    for name in names:
+        frappe.db.set_value("Invoice", name, "status", "Paid")
+    frappe.db.commit()
+except Exception:
+    frappe.db.rollback(save_point="before_mass_update")
+    raise
+
+# Chunked background migration (memory-safe)
+while names := frappe.db.get_all("Invoice",
+    filters={"migrated": 0}, pluck="name", limit=500):
+    for name in names:
+        frappe.db.set_value("Invoice", name, "migrated", 1)
+    frappe.db.commit()
+
+# Stream large result sets
+for row in frappe.db.sql(
+    "SELECT name FROM tabEmail Queue WHERE status=%s",
+    "Sent", as_dict=True, as_iterator=True
+):
+    process(row.name)
+
+# Raw SQL with parameters (always parameterize!)
+results = frappe.db.sql(
+    "SELECT name, grand_total FROM `tabSales Invoice` WHERE customer=%s AND docstatus=1",
+    ("CUST-001",), as_dict=True
+)
+```
+
+---
+
+### Key Distinctions
+
+**`get_all` vs `get_list`:**
+- `frappe.get_all()` — bypasses permissions, returns all matching records
+- `frappe.get_list()` — respects role permissions, only returns what the user can see
+
+**`get_value` vs `get_single_value`:**
+- `frappe.db.get_value("Customer", "CUST-001", "name")` — reads from `tabCustomer`
+- `frappe.db.get_single_value("System Settings", "date_format")` — reads from `tabSingles`
+
+**`for_update` vs `skip_locked` vs `wait=False`:**
+- `for_update=True` — locks row, waits if already locked
+- `skip_locked=True` — skips locked rows, returns None
+- `wait=False` — raises immediately if lock can't be acquired
+
+**Why `ALTER TABLE` fails mid-transaction:**
+`frappe.db.transaction_writes` tracks write count. DDL statements (`ALTER TABLE`, `CREATE`) trigger `check_implicit_commit` which blocks them inside active write transactions to prevent auto-commit from corrupting the transaction state.
+
+**Bulk update 100k rows without exhausting memory:**
+```python
+# Process in chunks, commit each batch
+batch_size = 500
+while True:
+    names = frappe.db.get_all("MyDocType",
+        filters={"processed": 0}, pluck="name", limit=batch_size)
+    if not names:
+        break
+    frappe.db.bulk_update([
+        {"doctype": "MyDocType", "name": n, "processed": 1}
+        for n in names
+    ])
+    frappe.db.commit()
+```

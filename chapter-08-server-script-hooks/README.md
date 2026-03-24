@@ -76,12 +76,14 @@ fixtures = [
 ]
 
 # ==============
-# API Whitelist Hooks
+# API Whitelist Hooks — override an existing whitelisted method
 # ==============
-whitelisted_methods = [
-    "your_app.api.get_custom_data",
-    "your_app.api.process_external_request"
-]
+# NOTE: The correct hook key is `override_whitelisted_methods`, not `whitelisted_methods`.
+# In v15, the last installed app wins (previously first app won).
+override_whitelisted_methods = {
+    "your_app.api.get_custom_data": "your_app.api.custom_get_data_override",
+    "your_app.api.process_external_request": "your_app.api.process_external_request_v2"
+}
 
 # ==============
 # UI Hooks
@@ -871,3 +873,342 @@ Common flags to be aware of:
 | `frappe.flags.ignore_permissions` | Tests / migrations | Bypass permission checks |
 | `frappe.flags.in_patch` | `bench migrate` patches | Skip hooks during schema patches |
 | `frappe.flags.in_install` | App installation | Skip hooks during initial setup |
+
+
+---
+
+## Addendum: Source Article Insights
+
+### The Philosophy of Hooks
+
+Hooks are Frappe's inversion-of-control mechanism. Instead of modifying core code, you declare what your app wants to do in `hooks.py` and the framework calls your functions at the right time. This is the open-closed principle in practice: the framework is open for extension, closed for modification.
+
+The key insight: **hooks are declarative, not imperative**. You don't call Frappe — Frappe calls you.
+
+```python
+# hooks.py — the contract between your app and the framework
+app_name = "my_app"
+app_title = "My App"
+
+# Document event hooks
+doc_events = {
+    "Customer": {
+        "after_insert": "my_app.hooks.send_welcome_email",
+        "before_save": "my_app.hooks.validate_customer_data",
+        "on_trash": "my_app.hooks.cleanup_customer_data"
+    },
+    "*": {  # Applies to ALL doctypes
+        "after_insert": "my_app.hooks.log_all_creates"
+    }
+}
+
+# Scheduler hooks
+scheduler_events = {
+    "daily": ["my_app.tasks.daily_cleanup"],
+    "hourly": ["my_app.tasks.sync_data"],
+    "cron": {
+        "0 2 * * *": ["my_app.tasks.midnight_report"]  # 2 AM daily
+    }
+}
+
+# Request lifecycle hooks — NOTE: before_request/after_request are not official hooks.
+# Use auth_hooks for request authentication, on_login/on_session_creation for session events.
+auth_hooks = ["my_app.auth.validate_custom_token"]
+on_login = "my_app.hooks.on_login"
+on_session_creation = "my_app.hooks.on_session_creation"
+
+# Permission hooks
+has_permission = {
+    "Sales Order": "my_app.permissions.check_sales_order_access"
+}
+permission_query_conditions = {
+    "Sales Order": "my_app.permissions.get_sales_order_conditions"
+}
+```
+
+---
+
+### How Frappe Discovers and Loads Hooks
+
+At startup, Frappe calls `_load_app_hooks()` which iterates all installed apps, imports each `hooks.py`, and merges all hook definitions into a single dictionary. The result is cached for performance.
+
+```python
+# Simplified version of Frappe's hook loading
+def _load_app_hooks(app_name=None):
+    hooks = {}
+    apps = [app_name] if app_name else get_installed_apps()
+
+    for app in apps:
+        try:
+            app_hooks = get_module(f"{app}.hooks")
+        except ImportError:
+            continue
+
+        for key, value in inspect.getmembers(app_hooks):
+            if not key.startswith("_") and not isinstance(value, (types.ModuleType, types.FunctionType, type)):
+                append_hook(hooks, key, value)
+
+    return hooks
+```
+
+**Multiple apps can hook the same event** — all registered functions run in sequence:
+
+```python
+# App A hooks.py
+doc_events = {"Customer": {"after_insert": "app_a.hooks.send_email"}}
+
+# App B hooks.py
+doc_events = {"Customer": {"after_insert": "app_b.hooks.create_task"}}
+
+# Result: both run when a Customer is inserted
+# Frappe merges them: ["app_a.hooks.send_email", "app_b.hooks.create_task"]
+```
+
+---
+
+### Document Event Hooks
+
+All document event hook functions receive `(doc, method=None)` as arguments. The `method` parameter contains the event name (e.g. `"on_submit"`) — it's optional and can be omitted if not needed.
+
+```python
+# my_app/hooks.py
+
+def send_welcome_email(doc, method=None):
+    """Runs after a Customer is inserted."""
+    frappe.sendmail(
+        recipients=[doc.email_id],
+        subject=f"Welcome, {doc.customer_name}!",
+        message=f"Your account has been created."
+    )
+
+def validate_customer_data(doc, method=None):
+    """Runs before a Customer is saved."""
+    if doc.credit_limit and doc.credit_limit < 0:
+        frappe.throw("Credit limit cannot be negative.")
+
+def log_all_creates(doc, method=None):
+    """Runs after ANY doctype is inserted."""
+    frappe.logger().info(f"New {doc.doctype} created: {doc.name} by {frappe.session.user}")
+```
+
+**Available document events:**
+
+| Event | When it fires |
+|-------|--------------|
+| `before_insert` | Before new doc is saved to DB |
+| `after_insert` | After new doc is saved to DB |
+| `before_validate` | Before validation runs |
+| `validate` | During validation |
+| `on_update` | After doc is saved (create or update) |
+| `before_submit` | Before docstatus changes to 1 |
+| `on_submit` | After docstatus changes to 1 |
+| `before_cancel` | Before docstatus changes to 2 |
+| `on_cancel` | After docstatus changes to 2 |
+| `on_trash` | Before document is deleted |
+| `after_delete` | After document is deleted |
+| `on_update_after_submit` | After a submitted doc is updated |
+
+---
+
+### Scheduler Event Hooks
+
+Scheduler hooks run background tasks at defined intervals via Frappe's job queue (Redis + RQ).
+
+```python
+# hooks.py
+scheduler_events = {
+    "all": ["my_app.tasks.run_every_minute"],   # every 60 seconds (configurable via scheduler_tick_interval)
+    "hourly": ["my_app.tasks.hourly_sync"],
+    "daily": ["my_app.tasks.daily_cleanup"],
+    "weekly": ["my_app.tasks.weekly_report"],
+    "monthly": ["my_app.tasks.monthly_archive"],
+    "cron": {
+        "0 2 * * *": ["my_app.tasks.midnight_processing"],  # 2 AM daily
+        "*/15 * * * *": ["my_app.tasks.every_15_minutes"]   # every 15 min
+    }
+}
+```
+
+```python
+# my_app/tasks.py
+import frappe
+
+def daily_cleanup():
+    """Delete error logs older than 30 days."""
+    frappe.db.sql("""
+        DELETE FROM `tabError Log`
+        WHERE creation < DATE_SUB(NOW(), INTERVAL 30 DAY)
+    """)
+    frappe.db.commit()
+
+def hourly_sync():
+    """Sync data with external system."""
+    try:
+        # Your sync logic
+        pass
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Hourly Sync Failed")
+```
+
+---
+
+### Request Lifecycle Hooks
+
+> **Correction:** `before_request` and `after_request` are **not** listed in the official Frappe hooks reference. They do not exist as supported hooks. For request-level authentication and validation, use the `auth_hooks` hook instead. For session lifecycle events, use `on_login`, `on_session_creation`, and `on_logout`.
+
+```python
+# hooks.py — correct hooks for request/session lifecycle
+
+# Authentication hook — runs during request authentication
+auth_hooks = ["my_app.auth.validate_custom_token"]
+
+# Session lifecycle hooks
+on_login = "my_app.auth.on_login"
+on_session_creation = "my_app.auth.on_session_creation"
+on_logout = "my_app.auth.on_logout"
+```
+
+```python
+# my_app/auth.py
+def validate_custom_token():
+    """Runs during request authentication. Use to validate custom headers/tokens."""
+    import frappe
+    # Validate JWT or API key from request headers
+    # Call frappe.set_user(user) to map the request to a user
+    pass
+
+def on_session_creation(login_manager):
+    """Runs after a user session is created (after login)."""
+    frappe.logger().info(f"Session created for {frappe.session.user}")
+```
+
+---
+
+### Custom Hook Types
+
+Frappe's hook system is fully dynamic — any variable in `hooks.py` becomes a hook type. You can create your own hook types and call them from your code.
+
+```python
+# App A hooks.py — defines a custom hook type
+data_validation_hooks = {
+    "Customer": "app_a.validators.validate_customer",
+    "Item": "app_a.validators.validate_item"
+}
+
+# App B hooks.py — another app can also register the same hook type
+data_validation_hooks = {
+    "Sales Order": "app_b.validators.validate_sales_order"
+}
+```
+
+```python
+# Calling your custom hook from anywhere in your code
+def run_custom_validation(doc):
+    validation_hooks = frappe.get_hooks("data_validation_hooks")
+    if doc.doctype in validation_hooks:
+        validator = frappe.get_attr(validation_hooks[doc.doctype])
+        validator(doc)
+```
+
+**Real examples from Frappe core:**
+
+```python
+# frappe/hooks.py
+extend_bootinfo = [
+    "frappe.utils.telemetry.add_bootinfo",
+    "frappe.core.doctype.user_permission.user_permission.send_user_permissions",
+]
+
+# frappe/sessions.py — calling the custom hook
+for hook in frappe.get_hooks("extend_bootinfo"):
+    frappe.get_attr(hook)(bootinfo=bootinfo)
+```
+
+---
+
+### Override Hooks
+
+Replace core Frappe behavior without touching core files.
+
+```python
+# hooks.py
+
+# Replace a whitelisted API method
+override_whitelisted_methods = {
+    "frappe.desk.doctype.event.event.get_events": "my_app.overrides.custom_get_events"
+}
+
+# Replace a DocType's controller class
+override_doctype_class = {
+    "User": "my_app.overrides.CustomUser"
+}
+```
+
+```python
+# my_app/overrides.py
+from frappe.core.doctype.user.user import User
+
+class CustomUser(User):
+    def validate(self):
+        super().validate()
+        # Add custom validation
+        if self.email and not self.email.endswith("@company.com"):
+            frappe.throw("Only company email addresses are allowed.")
+```
+
+---
+
+### UI and Asset Hooks
+
+Include custom JavaScript and CSS in the app.
+
+```python
+# hooks.py
+
+# Include in all pages (app interface)
+app_include_js = ["my_app.bundle.js"]
+app_include_css = ["my_app.bundle.css"]
+
+# Include for specific doctypes
+doctype_js = {
+    "Customer": "public/js/customer.js",
+    "Sales Order": "public/js/sales_order.js"
+}
+
+doctype_css = {
+    "Customer": "public/css/customer.css"
+}
+
+# Include in website (portal) pages
+web_include_js = ["my_app_web.bundle.js"]
+web_include_css = ["my_app_web.bundle.css"]
+```
+
+---
+
+### Error Handling in Hooks
+
+Always wrap hook logic in try/except to avoid breaking the main process.
+
+```python
+def my_hook(doc, method):
+    """Hook with proper error handling."""
+    try:
+        # Your logic here
+        do_something(doc)
+    except Exception:
+        # Log but don't re-raise — prevents breaking the save/submit
+        frappe.log_error(frappe.get_traceback(), f"my_hook failed for {doc.doctype} {doc.name}")
+
+def critical_hook(doc, method):
+    """Hook that SHOULD break the process on failure."""
+    try:
+        result = validate_with_external_api(doc)
+        if not result.ok:
+            frappe.throw(f"External validation failed: {result.message}")
+    except frappe.ValidationError:
+        raise  # Re-raise validation errors (they show to the user)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "External API Error")
+        frappe.throw("Could not validate with external system. Please try again.")
+```

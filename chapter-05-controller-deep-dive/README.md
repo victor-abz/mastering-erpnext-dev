@@ -1140,3 +1140,230 @@ The `production_plan_controller.py` in `chapter-05-controller-deep-dive/controll
 - **BOM explosion** — a real-world example of N+1 avoidance using batch SQL queries
 
 See also `projects/production_planning/` for the full working implementation including `get_permission_query_conditions()` — a practical example of row-level permission filtering.
+
+
+---
+
+## Addendum: Source Article Insights
+
+### `frappe.call()` and `run_doc_method` Internals
+
+`frappe.call()` is the bridge between JavaScript and Python DocType methods. When you call `frm.call('method_name')`, Frappe automatically:
+1. Takes your current document data
+2. Creates a Document object on the server via `frappe.get_doc()`
+3. Executes your whitelisted method on that object
+4. Returns the result
+
+**The full flow:**
+```
+frm.call('calculate_total')
+    ↓
+HTTP POST to /api/method/run_doc_method
+    ↓
+run_doc_method() creates doc = frappe.get_doc(docs)
+    ↓
+doc.run_method('calculate_total')
+    ↓
+Your @frappe.whitelist() method executes
+    ↓
+Response returned to client
+```
+
+**Why Postman gives "Method not found":** Postman needs to use the `run_doc_method` endpoint with the complete document data structure, not just the method name.
+
+**Server-side method:**
+```python
+class MyDocType(Document):
+    @frappe.whitelist()
+    def calculate_total(self, multiplier=1.0):
+        """Called from client via frm.call()"""
+        self.total = sum(item.amount for item in self.items) * multiplier
+        return self.total
+    
+    @frappe.whitelist()
+    def get_related_data(self, param=None):
+        # self is the document — already loaded, no need to fetch
+        result = frappe.get_all("Related DocType",
+            filters={"parent_ref": self.name},
+            fields=["name", "value"]
+        )
+        return result
+```
+
+**Client-side call patterns:**
+```javascript
+// Pattern 1: frm.call (simplest — sends frm.doc automatically)
+frm.call('calculate_total', { multiplier: 1.5 })
+    .then(r => {
+        frm.set_value('total', r.message);
+    });
+
+// Pattern 2: frappe.call with doc
+frappe.call({
+    doc: frm.doc,
+    method: 'calculate_total',
+    args: { multiplier: 1.5 },
+    callback: r => {
+        frm.set_value('total', r.message);
+        frm.refresh_field('total');
+    }
+});
+
+// Pattern 3: frappe.call with dt/dn (fetch from DB)
+frappe.call({
+    method: 'run_doc_method',
+    args: {
+        method: 'calculate_total',
+        dt: 'My DocType',
+        dn: frm.doc.name,
+        args: { multiplier: 1.5 }
+    }
+});
+
+// Pattern 4: module-level function (not a DocType method)
+frappe.call({
+    method: 'myapp.utils.currency.get_exchange_rate',
+    args: { from_currency: 'USD', to_currency: 'EUR' },
+    callback: r => console.log(r.message)
+});
+```
+
+**Postman / REST API:**
+```http
+# Call a DocType instance method
+POST /api/method/run_doc_method
+{
+    "method": "calculate_total",
+    "dt": "Sales Invoice",
+    "dn": "SINV-00001",
+    "args": {"multiplier": 1.1}
+}
+
+# Call a module-level function
+POST /api/method/myapp.utils.currency.get_exchange_rate
+{
+    "from_currency": "USD",
+    "to_currency": "EUR"
+}
+```
+
+---
+
+### Creating Related Documents
+
+A common controller pattern: creating a new related document from an existing one (e.g., creating Asset Maintenance from Asset, creating User from Employee).
+
+**The pattern:**
+```
+User clicks button → JS collects data → frappe.call() → Python creates doc → JS navigates to new doc
+```
+
+**Server-side (Python):**
+```python
+@frappe.whitelist()
+def create_asset_maintenance(asset, item_code, item_name, asset_category, company):
+    """Create Asset Maintenance from Asset"""
+    doc = frappe.new_doc("Asset Maintenance")
+    doc.update({
+        "asset_name": asset,
+        "company": company,
+        "item_code": item_code,
+        "item_name": item_name,
+        "asset_category": asset_category,
+    })
+    return doc  # Return unsaved draft for user to review
+```
+
+**Client-side (JavaScript):**
+```javascript
+create_asset_maintenance: function(frm) {
+    frappe.call({
+        method: "erpnext.assets.doctype.asset.asset.create_asset_maintenance",
+        args: {
+            asset: frm.doc.name,
+            item_code: frm.doc.item_code,
+            item_name: frm.doc.item_name,
+            asset_category: frm.doc.asset_category,
+            company: frm.doc.company,
+        },
+        callback: function(r) {
+            // Sync document to local model, then navigate
+            var doc = frappe.model.sync(r.message)[0];
+            frappe.set_route("Form", doc.doctype, doc.name);
+        }
+    });
+}
+```
+
+**`frappe.model.sync()` explained:** Takes the server response dictionary and stores it in Frappe's client-side `locals` object, making it available for navigation and form loading without another server round-trip.
+
+**More complex example — create and save immediately:**
+```python
+@frappe.whitelist()
+def create_user_from_employee(employee, email=None):
+    emp = frappe.get_doc("Employee", employee)
+    
+    # Parse name
+    parts = emp.employee_name.split(" ")
+    first_name = parts[0]
+    last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
+    
+    user = frappe.new_doc("User")
+    user.update({
+        "email": email or emp.prefered_email,
+        "first_name": first_name,
+        "last_name": last_name,
+        "enabled": 1,
+        "gender": emp.gender,
+    })
+    user.insert()
+    
+    # Update employee with user link
+    emp.user_id = user.name
+    emp.save()
+    
+    return user.name  # Return name, not doc (caller reloads current form)
+```
+
+```javascript
+// Client: reload current form instead of navigating
+create_user: function(frm) {
+    if (!frm.doc.prefered_email) {
+        frappe.throw(__("Please enter Preferred Contact Email"));
+    }
+    frappe.call({
+        method: "myapp.employee.create_user_from_employee",
+        args: { employee: frm.doc.name },
+        freeze: true,
+        freeze_message: __("Creating User..."),
+        callback: r => frm.reload_doc()
+    });
+}
+```
+
+**With child tables:**
+```python
+@frappe.whitelist()
+def create_purchase_from_sales(sales_order):
+    so = frappe.get_doc("Sales Order", sales_order)
+    po = frappe.new_doc("Purchase Order")
+    po.supplier = "DEFAULT-SUPPLIER"
+    po.transaction_date = frappe.utils.today()
+    
+    for item in so.items:
+        po.append("items", {
+            "item_code": item.item_code,
+            "qty": item.qty,
+            "rate": item.rate * 0.7,  # 30% margin
+        })
+    
+    return po  # Return draft for review
+```
+
+**Best practices:**
+- Always use `@frappe.whitelist()` — without it, the method is inaccessible from JS
+- Return the document (not just the name) when you want to navigate to it
+- Return just the name when you want to reload the current form
+- Use `freeze: true` for operations that take time
+- Validate on the client side before calling the server
+- Use `doc.update({...})` instead of setting fields one by one

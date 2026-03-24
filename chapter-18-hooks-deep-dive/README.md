@@ -236,24 +236,26 @@ def send_expiry_notifications():
 
 ## 18.5 Request Lifecycle Hooks
 
-Execute code for every HTTP request — useful for logging, rate limiting, and cross-cutting concerns.
+> **Correction:** `before_request` and `after_request` are **not** listed in the official Frappe hooks reference. For request-level authentication, use `auth_hooks`. For session lifecycle events, use `on_login`, `on_session_creation`, and `on_logout`.
 
 ```python
-# hooks.py
-before_request = ["my_app.middleware.log_request"]
-after_request  = ["my_app.middleware.log_response"]
+# hooks.py — correct hooks for request/session lifecycle
+auth_hooks = ["my_app.middleware.validate_token"]
+on_login = "my_app.middleware.on_login"
+on_session_creation = "my_app.middleware.on_session_creation"
+on_logout = "my_app.middleware.on_logout"
 ```
 
 ```python
 # middleware.py
 import frappe
 
-def log_request():
-    path = frappe.local.request.path
-    frappe.logger().debug(f"→ {frappe.session.user} {path}")
+def validate_token():
+    """Runs during request authentication. Validate custom headers here."""
+    pass
 
-def log_response(response, request):
-    frappe.logger().debug(f"← {response.status_code}")
+def on_session_creation(login_manager):
+    frappe.logger().debug(f"Session created for {frappe.session.user}")
 ```
 
 ---
@@ -476,7 +478,7 @@ The most important hook types:
 |------|---------|
 | `doc_events` | React to document lifecycle events |
 | `scheduler_events` | Time-based background tasks |
-| `before_request` / `after_request` | HTTP request middleware |
+| `auth_hooks` | HTTP request authentication |
 | `has_permission` / `permission_query_conditions` | Custom access control |
 | `app_include_js` / `doctype_js` | Custom UI assets |
 | `override_doctype_class` | Replace document classes |
@@ -486,3 +488,306 @@ The most important hook types:
 ---
 
 **Next Chapter**: Workflows — managing document approval processes with states and transitions.
+
+
+---
+
+## 📌 Addendum: Hooks — Complete Theory, Philosophy, and Custom Hook Types
+
+### The Philosophy Behind Hooks
+
+Hooks represent one of the most elegant architectural patterns in modern software development. They allow applications to extend functionality without modifying the core codebase.
+
+**Key philosophical principles:**
+1. **Inversion of Control** — the framework controls execution flow; applications register their interest
+2. **Declarative over Imperative** — declare what you want to do, not how to do it
+3. **Composition over Inheritance** — compose functionality through simple function definitions
+4. **Open-Closed Principle** — open for extension, closed for modification
+
+### Hooks in the Software Industry
+
+Hooks have a rich history:
+- **C/Assembly era**: function pointers and callbacks for interrupts
+- **OOP era**: Observer pattern — objects subscribe to events
+- **Plugin era**: entire modules dynamically loaded (browser extensions, VS Code plugins)
+- **Modern era**: React hooks, Angular lifecycle hooks, Frappe hooks
+
+### How Frappe Discovers Hooks
+
+When Frappe starts, `_load_app_hooks()` iterates through all installed apps and loads their `hooks.py` files:
+
+```python
+def _load_app_hooks(app_name=None):
+    hooks = {}
+    apps = [app_name] if app_name else get_installed_apps()
+    
+    for app in apps:
+        try:
+            app_hooks = get_module(f"{app}.hooks")
+        except ImportError:
+            pass
+        
+        def _is_valid_hook(obj):
+            return not isinstance(obj, types.ModuleType | types.FunctionType | type)
+        
+        for key, value in inspect.getmembers(app_hooks, predicate=_is_valid_hook):
+            if not key.startswith("_"):
+                append_hook(hooks, key, value)
+    return hooks
+```
+
+**Key insight**: Frappe loads **ANY** non-private attribute from your `hooks.py` as a potential hook. There is no predefined list of valid hook types.
+
+### All Hook Types Reference
+
+#### Application Lifecycle Hooks
+
+```python
+before_install = "my_app.hooks.check_requirements"
+after_install = "my_app.hooks.setup_initial_data"
+before_migrate = "my_app.hooks.backup_data"
+after_migrate = "my_app.hooks.update_database"
+```
+
+#### Document Event Hooks
+
+```python
+doc_events = {
+    "Customer": {
+        "before_insert": "my_app.hooks.validate_customer",
+        "after_insert": "my_app.hooks.send_welcome_email",
+        "before_save": "my_app.hooks.calculate_totals",
+        "on_update": "my_app.hooks.update_related_docs",
+        "before_submit": "my_app.hooks.pre_submit_check",
+        "on_submit": "my_app.hooks.create_invoice",
+        "before_cancel": "my_app.hooks.pre_cancel_check",
+        "on_cancel": "my_app.hooks.reverse_transactions",
+        "on_trash": "my_app.hooks.cleanup_data",
+        "before_update_after_submit": "my_app.hooks.validate_amendment",
+        "on_update_after_submit": "my_app.hooks.post_amendment_update",
+    },
+    "*": {  # Apply to ALL doctypes
+        "after_insert": "my_app.hooks.log_all_creates"
+    }
+}
+```
+
+#### Scheduler Event Hooks
+
+```python
+scheduler_events = {
+    "all": ["my_app.hooks.run_every_minute"],
+    "hourly": ["my_app.hooks.sync_data"],
+    "daily": ["my_app.hooks.cleanup_old_files"],
+    "weekly": ["my_app.hooks.generate_reports"],
+    "monthly": ["my_app.hooks.archive_data"],
+    "cron": {
+        "0 2 * * *": ["my_app.hooks.midnight_processing"]  # 2 AM daily
+    }
+}
+```
+
+#### Request / Session Lifecycle Hooks
+
+```python
+# Note: before_request / after_request are not valid Frappe hooks.
+# Use auth_hooks for request authentication, on_login/on_session_creation for session events.
+auth_hooks = ["my_app.hooks.validate_token"]
+on_login = "my_app.hooks.on_login"
+on_session_creation = "my_app.hooks.on_session_creation"
+on_logout = "my_app.hooks.on_logout"
+```
+
+#### Permission Hooks
+
+```python
+has_permission = {
+    "Customer": "my_app.hooks.check_customer_access"
+}
+
+permission_query_conditions = {
+    "Customer": "my_app.hooks.add_customer_filters"
+}
+
+# Implementation
+def check_customer_access(doc, user):
+    if doc.owner == user:
+        return True
+    return False
+
+def add_customer_filters(user):
+    return f"`tabCustomer`.owner = '{user}'"
+```
+
+#### UI and Asset Hooks
+
+```python
+app_include_js = ["my_app.bundle.js"]
+app_include_css = ["my_app.bundle.css"]
+
+doctype_js = {
+    "Customer": "public/js/customer.js"
+}
+
+doctype_css = {
+    "Customer": "public/css/customer.css"
+}
+
+web_include_js = ["my_app/public/js/website.js"]
+web_include_css = ["my_app/public/css/website.css"]
+```
+
+#### Override Hooks
+
+```python
+override_doctype_class = {
+    "Customer": "my_app.overrides.CustomCustomer"
+}
+
+override_whitelisted_methods = {
+    "frappe.desk.query_report.get_report_data": "my_app.overrides.custom_report_data"
+}
+```
+
+### Hook vs Hook Type: The Key Difference
+
+**Hook Type** is the **category/name** (like `doc_events`, `scheduler_events`) — it's the trigger/when.
+
+**Hook** is the **actual function** that gets executed — it's the action/what.
+
+```python
+# "doc_events" = HOOK TYPE (the trigger)
+doc_events = {
+    "Customer": {
+        "after_insert": "my_app.hooks.send_email"  # "send_email" = HOOK (the action)
+    }
+}
+```
+
+### Creating Custom Hook Types
+
+Since Frappe loads ANY non-private attribute from `hooks.py`, you can create your own hook types:
+
+```python
+# In your_app/hooks.py
+
+# Simple list-based custom hook
+custom_logging_hooks = [
+    "your_app.hooks.log_user_action",
+    "your_app.hooks.log_system_event"
+]
+
+# Dictionary-based custom hook
+data_validation_hooks = {
+    "Customer": "your_app.hooks.validate_customer_data",
+    "Item": "your_app.hooks.validate_item_data",
+}
+
+# Accessing your custom hooks anywhere
+custom_hooks = frappe.get_hooks("custom_logging_hooks")
+for hook_func in custom_hooks:
+    frappe.get_attr(hook_func)()
+```
+
+### Real Examples from Frappe Codebase
+
+```python
+# extend_bootinfo — allows apps to extend boot information
+extend_bootinfo = [
+    "frappe.utils.telemetry.add_bootinfo",
+    "frappe.core.doctype.user_permission.user_permission.send_user_permissions",
+]
+
+# Used in frappe/sessions.py:
+for hook in frappe.get_hooks("extend_bootinfo"):
+    frappe.get_attr(hook)(bootinfo=bootinfo)
+
+# standard_navbar_items — customize navbar
+standard_navbar_items = [
+    {
+        "item_label": "My Profile",
+        "item_type": "Route",
+        "route": "/app/user-profile",
+        "is_standard": 1,
+    },
+]
+```
+
+### Hook Execution Flow
+
+1. **User creates a Customer document**
+2. **Frappe checks**: "What hooks are registered for Customer + after_insert?"
+3. **Frappe finds**: `["my_app.hooks.send_email"]`
+4. **Frappe calls**: `frappe.get_attr("my_app.hooks.send_email")(doc, "after_insert")`
+5. **Your function runs**
+6. **Frappe continues** with the normal process
+
+Multiple apps can register hooks for the same event — Frappe runs all of them in order.
+
+### Advanced Hook Patterns
+
+```python
+# Conditional hook execution
+def conditional_hook(doc, method):
+    if doc.doctype == "Customer" and doc.customer_type == "Company":
+        # Your logic here
+        pass
+
+# Hook with error handling (don't break the main process)
+def robust_hook(doc, method):
+    try:
+        # Your hook logic here
+        pass
+    except Exception as e:
+        frappe.logger().error(f"Hook error: {str(e)}")
+        # Don't re-raise unless critical
+
+# Hook with database transactions
+def transactional_hook(doc, method):
+    try:
+        frappe.db.sql("UPDATE `tabYour Table` SET field = %s WHERE name = %s",
+                     [value, doc.name])
+        frappe.db.commit()
+    except Exception as e:
+        frappe.db.rollback()
+        raise
+
+# Hook with logging
+def logged_hook(doc, method):
+    frappe.logger().info(f"Executing hook for {doc.doctype} - {method}")
+    try:
+        # Your logic
+        frappe.logger().info("Hook executed successfully")
+    except Exception as e:
+        frappe.logger().error(f"Hook execution failed: {str(e)}")
+        raise
+```
+
+### Caching and Performance
+
+Hooks are cached in memory after first load:
+```python
+# Clear hook cache if hooks aren't updating
+frappe.cache.delete_value("app_hooks")
+# Or clear all cache
+frappe.clear_cache()
+```
+
+### Testing Hooks
+
+```python
+# Enable developer mode to see detailed errors
+# In site_config.json: {"developer_mode": 1}
+
+# Test by triggering the event and checking logs
+# Or write unit tests:
+def test_welcome_email_hook():
+    customer = frappe.get_doc({
+        "doctype": "Customer",
+        "customer_name": "Test Corp"
+    })
+    customer.insert()
+    # Assert email was sent
+    emails = frappe.get_all("Email Queue", filters={"reference_name": customer.name})
+    assert len(emails) > 0
+```

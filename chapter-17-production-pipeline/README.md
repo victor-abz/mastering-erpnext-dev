@@ -2490,3 +2490,413 @@ Production deployment requires comprehensive planning:
 **Book Complete! 🎉**
 
 You now have a comprehensive guide to mastering ERPNext development, from understanding the Frappe mindset to deploying production applications with enterprise-grade security and reliability.
+
+
+---
+
+## Addendum: Source Article Insights
+
+### Production Server Setup
+
+Production mode configures Frappe with Nginx (reverse proxy), Supervisor (process management), and Redis (caching/queuing). **Never run production setup on a local dev machine.**
+
+```bash
+# 1. Enable production mode (run as the frappe system user, not root)
+sudo bench setup production [frappe-user]
+
+# 2. Generate Nginx config
+bench setup nginx
+# If prompted to overwrite, type Yes
+
+# 3. Configure Supervisor and services
+bench setup supervisor
+bench setup socketio
+bench setup redis
+
+# 4. Apply Supervisor changes
+sudo supervisorctl reread
+sudo supervisorctl update
+sudo supervisorctl restart all
+
+# 5. Fix file permissions for web server
+sudo usermod -aG [frappe-user] www-data
+sudo systemctl restart nginx
+```
+
+After this, your site is accessible at `http://[server-ip]`.
+
+---
+
+### SSL and Domain Setup
+
+```bash
+# 1. Associate domain with your site
+bench setup add-domain --site [site-name] [your-domain.com]
+
+# 2. Install Certbot (Let's Encrypt)
+sudo apt update && sudo apt install -y snapd
+sudo snap install core && sudo snap refresh core
+sudo apt remove -y certbot
+sudo snap install --classic certbot
+sudo ln -sf /snap/bin/certbot /usr/bin/certbot
+
+# 3. Enable DNS-based multitenancy (required for custom domains)
+bench config dns_multitenant on
+
+# 4. Regenerate Nginx config
+bench setup nginx
+sudo service nginx restart
+
+# 5. Get SSL certificate
+sudo certbot --nginx
+# Enter domain and email when prompted
+
+# 6. Test auto-renewal
+sudo certbot renew --dry-run
+```
+
+**Optional: Specify SSL paths in site_config.json:**
+
+```json
+{
+  "domains": [
+    {
+      "domain": "your-domain.com",
+      "ssl_certificate": "/etc/letsencrypt/live/your-domain.com/fullchain.pem",
+      "ssl_certificate_key": "/etc/letsencrypt/live/your-domain.com/privkey.pem"
+    }
+  ]
+}
+```
+
+```bash
+# Regenerate and reload after editing site_config.json
+bench setup nginx
+sudo service nginx restart
+```
+
+---
+
+### Exposing Local Frappe with ngrok
+
+ngrok creates a secure tunnel from a public URL to your local Frappe instance. Useful for testing webhooks, demos, and third-party integrations.
+
+```bash
+# 1. Navigate to bench directory
+cd frappe-bench/
+
+# 2. Install pyngrok in bench environment
+bench pip install pyngrok
+
+# 3. Get your authtoken from https://dashboard.ngrok.com/authtokens
+
+# 4. Store authtoken in site config
+bench --site [site-name] set-config ngrok_authtoken YOUR_TOKEN_HERE
+
+# 5. Set the HTTP port
+bench --site [site-name] set-config http_port 8000
+
+# 6. Start bench (in one terminal)
+bench start
+
+# 7. Start ngrok tunnel (in another terminal)
+bench --site [site-name] ngrok --bind-tls
+# Output: Public URL: https://abc123.ngrok.io
+```
+
+**Manual ngrok (if bench command fails):**
+
+```bash
+# Authenticate once
+ngrok authtoken YOUR_TOKEN_HERE
+
+# Start tunnel manually
+ngrok http 8000
+```
+
+**Alternatives to ngrok:** localtunnel, pagekite, Cloudflare Tunnel (free, no bandwidth limits).
+
+---
+
+### Dockerizing Frappe: Dockerfile Concepts
+
+Docker packages your app and all dependencies into a portable container. Key concepts:
+
+**Image vs Container:**
+- Image = read-only blueprint (layers stacked on top of each other)
+- Container = running instance of an image (adds a writable layer on top)
+
+**Multi-stage Dockerfile for Frappe:**
+
+```dockerfile
+# Stage 1: Build stage
+ARG PYTHON_VERSION=3.11.6
+ARG DEBIAN_BASE=bookworm
+FROM python:${PYTHON_VERSION}-slim-${DEBIAN_BASE} AS base
+
+# Install system dependencies
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        git curl wget \
+        libmysqlclient-dev \
+        wkhtmltopdf \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create frappe user
+RUN useradd -ms /bin/bash frappe
+USER frappe
+WORKDIR /home/frappe
+
+# Install Node.js via nvm
+ARG NODE_VERSION=18.18.2
+ENV NVM_DIR=/home/frappe/.nvm
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash \
+    && . $NVM_DIR/nvm.sh \
+    && nvm install ${NODE_VERSION} \
+    && nvm use ${NODE_VERSION}
+
+ENV PATH=${NVM_DIR}/versions/node/v${NODE_VERSION}/bin/:${PATH}
+
+# Install bench
+RUN pip install --user frappe-bench
+
+ENV PATH=/home/frappe/.local/bin:$PATH
+
+# Stage 2: App stage
+FROM base AS app
+
+ARG FRAPPE_BRANCH=version-15
+ARG APPS_JSON_BASE64
+
+# Initialize bench
+RUN bench init --frappe-branch=${FRAPPE_BRANCH} --skip-redis-config-generation frappe-bench
+
+WORKDIR /home/frappe/frappe-bench
+
+# Install custom apps from apps.json
+RUN if [ -n "${APPS_JSON_BASE64}" ]; then \
+        echo "${APPS_JSON_BASE64}" | base64 -d > /tmp/apps.json; \
+        bench get-app --resolve-deps /tmp/apps.json; \
+    fi
+
+EXPOSE 8000 9000
+
+CMD ["bench", "start"]
+```
+
+**Build the image:**
+
+```bash
+# Encode apps.json
+export APPS_JSON_BASE64=$(base64 -w 0 apps.json)
+
+# Build
+docker build \
+  --build-arg FRAPPE_BRANCH=version-15 \
+  --build-arg APPS_JSON_BASE64=$APPS_JSON_BASE64 \
+  --tag mycompany/frappe-app:latest \
+  .
+```
+
+**Layer caching best practice:** Put rarely-changing instructions first (system deps, Python packages), frequently-changing instructions last (app code). This way, editing your app code doesn't invalidate the expensive dependency layers.
+
+---
+
+### Docker Compose for Frappe
+
+Frappe requires multiple services: backend (Gunicorn), frontend (Nginx), websocket (Socket.IO), workers, scheduler, MariaDB, and Redis.
+
+```yaml
+# compose.yaml
+x-customizable-image: &customizable_image
+  image: ${CUSTOM_IMAGE:-frappe/erpnext}:${CUSTOM_TAG:-version-15}
+  restart: ${RESTART_POLICY:-unless-stopped}
+
+x-backend-defaults: &backend_defaults
+  <<: *customizable_image
+  volumes:
+    - sites:/home/frappe/frappe-bench/sites
+    - logs:/home/frappe/frappe-bench/logs
+
+services:
+  configurator:
+    <<: *backend_defaults
+    restart: on-failure
+    entrypoint: ["bash", "-c"]
+    command: >
+      ls -1 apps > sites/apps.txt;
+      bench set-config -g db_host $DB_HOST;
+      bench set-config -g db_port $DB_PORT;
+      bench set-config -g redis_cache "redis://$REDIS_CACHE";
+      bench set-config -g redis_queue "redis://$REDIS_QUEUE";
+      bench set-config -g redis_socketio "redis://$REDIS_QUEUE";
+    depends_on:
+      db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_started
+
+  backend:
+    <<: *backend_defaults
+    depends_on:
+      configurator:
+        condition: service_completed_successfully
+
+  frontend:
+    <<: *customizable_image
+    command: nginx-entrypoint.sh
+    environment:
+      BACKEND: backend:8000
+      SOCKETIO: websocket:9000
+      FRAPPE_SITE_NAME_HEADER: ${FRAPPE_SITE_NAME_HEADER:-$host}
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+    ports:
+      - "${HTTP_PUBLISH_PORT:-8080}:8080"
+    depends_on:
+      - backend
+      - websocket
+
+  websocket:
+    <<: *backend_defaults
+    command: node /home/frappe/frappe-bench/apps/frappe/socketio.js
+
+  queue-short:
+    <<: *backend_defaults
+    command: bench worker --queue short,default
+
+  queue-long:
+    <<: *backend_defaults
+    command: bench worker --queue long,default,short
+
+  scheduler:
+    <<: *backend_defaults
+    command: bench schedule
+
+  db:
+    image: mariadb:10.6
+    healthcheck:
+      test: mysqladmin ping -h localhost --password=${DB_PASSWORD}
+      interval: 1s
+      retries: 20
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME:-frappe}
+    volumes:
+      - db-data:/var/lib/mysql
+
+  redis-cache:
+    image: redis:6.2-alpine
+
+  redis-queue:
+    image: redis:6.2-alpine
+
+volumes:
+  sites:
+  logs:
+  db-data:
+```
+
+**Startup order matters:** `db` → `redis` → `configurator` (runs once, sets up config) → `backend`/`websocket` → `frontend` → `workers`/`scheduler`.
+
+**Key patterns:**
+- `depends_on` with `condition: service_completed_successfully` ensures configurator finishes before backend starts
+- `depends_on` with `condition: service_healthy` waits for MariaDB to be ready
+- YAML anchors (`&backend_defaults`, `<<: *backend_defaults`) reduce repetition
+
+---
+
+### Dev Containers for Frappe Development
+
+Dev Containers let you develop inside a Docker container using VS Code. Everyone on the team gets an identical environment.
+
+**Setup:**
+
+```bash
+git clone https://github.com/frappe/frappe_docker.git
+cd frappe_docker
+cp -R devcontainer-example .devcontainer
+cp -R development/vscode-example development/.vscode
+code .
+# Press Ctrl+Shift+P → "Dev Containers: Reopen in Container"
+```
+
+**Inside the container, initialize bench:**
+
+```bash
+bench init --skip-redis-config-generation frappe-bench
+cd frappe-bench
+
+# Point to Docker services (not localhost)
+bench set-config -g db_host mariadb
+bench set-config -g redis_cache redis://redis-cache:6379
+bench set-config -g redis_queue redis://redis-queue:6379
+bench set-config -g redis_socketio redis://redis-queue:6379
+
+# Create site
+bench new-site \
+  --db-root-password 123 \
+  --admin-password admin \
+  --mariadb-user-host-login-scope=% \
+  mysite.localhost
+
+bench start
+```
+
+**`.devcontainer/devcontainer.json`:**
+
+```json
+{
+  "name": "Frappe Bench",
+  "dockerComposeFile": "./docker-compose.yml",
+  "service": "frappe",
+  "workspaceFolder": "/workspace/development",
+  "remoteUser": "frappe",
+  "forwardPorts": [8000, 9000, 6787],
+  "shutdownAction": "stopCompose",
+  "mounts": [
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.ssh,target=/home/frappe/.ssh,type=bind,consistency=cached"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-vscode.live-server",
+        "mtxr.sqltools"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "debug.node.autoAttach": "disabled"
+      }
+    }
+  }
+}
+```
+
+**Building a custom Docker image with your app:**
+
+```bash
+# 1. Create apps.json
+cat > apps.json << 'EOF'
+[
+  {"url": "https://github.com/frappe/erpnext", "branch": "version-15"},
+  {"url": "https://github.com/myorg/my-app", "branch": "main"}
+]
+EOF
+
+# 2. Encode it
+export APPS_JSON_BASE64=$(base64 -w 0 apps.json)
+
+# 3. Clone frappe_docker and build
+git clone https://github.com/frappe/frappe_docker
+cd frappe_docker
+docker build \
+  --build-arg FRAPPE_BRANCH=version-15 \
+  --build-arg APPS_JSON_BASE64=$APPS_JSON_BASE64 \
+  --file images/layered/Containerfile \
+  --tag myorg/my-frappe-app:latest \
+  .
+
+# 4. Push to Docker Hub
+docker push myorg/my-frappe-app:latest
+```

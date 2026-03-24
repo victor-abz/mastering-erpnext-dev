@@ -972,3 +972,241 @@ console.log(frm.doc.docstatus);
 console.log(frm.get_field("customer"));
 console.log(frm.fields_dict["customer"]);
 ```
+
+
+---
+
+## 📌 Addendum: Interview Questions, API Deep Dive, and Advanced Reference
+
+### Frappe/ERPNext Interview Questions
+
+#### Junior Level
+
+**Q: What is the Frappe Framework?**
+A: A full-stack, meta-driven web framework built on Python (backend) and JavaScript (frontend). Unlike Django/Flask, it's metadata-first — you define application structure through DocTypes rather than writing explicit models, views, and controllers. Every DocType automatically gets REST APIs, auto-generated UI, role-based permissions, and workflows.
+
+**Q: What is the difference between a DocType and a Document?**
+A: DocType = the schema/blueprint (like a class definition). Document = an instance of a DocType (like an object instance). DocType metadata is stored in `tabDocType`; Documents are stored in `tab{DocType Name}`.
+
+**Q: What is the Singles table?**
+A: Single DocTypes (like System Settings) store their data in `tabSingles` as key-value pairs instead of having their own table. Access with `frappe.db.get_single_value("System Settings", "field_name")`.
+
+**Q: What are Fixtures?**
+A: Predefined data records exported from a site and bundled with an app. They enable version-controlled configuration management. Common fixture types: Custom Fields, Property Setters, Client Scripts, Print Formats, Roles, Workflows.
+
+```python
+# hooks.py
+fixtures = [
+    "Custom Field",
+    "Property Setter",
+    {"dt": "Role", "filters": [["name", "in", ["Custom Role 1"]]]},
+]
+```
+
+```bash
+bench export-fixtures  # Creates JSON files in fixtures/
+```
+
+**Q: What is a Property Setter?**
+A: A DocType that overrides properties of standard DocTypes and fields without modifying core code. Stored in `tabProperty Setter`, applied at runtime via `apply_property_setters()`. Survives framework updates.
+
+Common properties: `reqd`, `hidden`, `read_only`, `label`, `default`, `options`, `allow_on_submit`.
+
+#### Senior Level
+
+**Q: What is the difference between Redis cache and local cache in Frappe?**
+A: Redis cache is shared across all workers and processes (persistent across requests). Local cache is per-process/per-request (thread-local, faster but not shared). Use Redis for data that needs to be shared; use local cache for request-scoped data.
+
+**Q: What is the architecture of Frappe?**
+A: Frappe follows a meta-driven MVT-like pattern:
+- Model: DocType definitions + Python controllers
+- View: Auto-generated forms/lists + Jinja templates
+- Controller: Python controller classes + hooks
+
+More accurately described as **meta-driven MVC** — the metadata (DocType JSON) drives everything.
+
+**Q: Is Frappe MVC or MVT?**
+A: Neither purely. It's meta-driven. The DocType definition acts as both model and view configuration. The Python controller is the controller. Jinja templates handle web views. The framework auto-generates most of the view layer from metadata.
+
+**Q: How does Frappe handle database transactions?**
+A: Frappe wraps every request in a transaction. On success, it commits. On any unhandled exception, it rolls back. You can manually commit with `frappe.db.commit()` for long-running operations. Use `frappe.db.rollback()` to explicitly rollback.
+
+**Q: How does Frappe implement multi-tenancy?**
+A: Each site gets its own database. The `frappe.local.site` variable determines which database to connect to. Bench manages multiple sites, each with its own `site_config.json`. A single Frappe process can serve multiple sites.
+
+**Q: What are anti-patterns in Frappe?**
+A: 
+- Modifying core files directly (breaks on upgrade)
+- Using `frappe.db.sql()` when ORM methods exist (bypasses permissions)
+- Not using `frappe.db.commit()` in long loops (memory issues)
+- Calling `frappe.get_doc()` in a loop without caching (N+1 queries)
+- Using `ignore_permissions=True` in user-facing code (security risk)
+
+**Q: How to move customizations between sites without manual migration?**
+A: Use Fixtures. Export with `bench export-fixtures`, commit to git, install on target site with `bench install-app` or `bench migrate`.
+
+**Q: Why does changing a field type to Float cause errors?**
+A: Frappe performs type casting at the ORM level. If existing records contain `""` (empty string) and the field is now `Float`, Python's `float("")` raises `ValueError`. Fix: write a `[pre_model_sync]` patch to convert empty strings to `0` before changing the field type.
+
+**Q: What are Web Forms in Frappe?**
+A: Public-facing forms that allow non-logged-in users (or users without desk access) to submit data. Built on top of DocTypes, they generate a web page with a form that creates documents on submission.
+
+**Q: What are Server Scripts in Frappe?**
+A: Python scripts stored in the database (not files) that can be attached to document events or API endpoints. Useful for customizations that don't require a full custom app. Managed via the Server Script DocType.
+
+### Frappe API — Complete Reference
+
+#### Built-in Client Methods
+
+```python
+# frappe.client module (accessible via /api/method/frappe.client.*)
+frappe.client.get_list(doctype, fields, filters, limit_start, limit_page_length)
+frappe.client.get(doctype, name)
+frappe.client.get_value(doctype, filters, fieldname)
+frappe.client.insert(doc)
+frappe.client.save(doc)
+frappe.client.delete(doctype, name)
+frappe.client.submit(doc)
+frappe.client.cancel(doctype, name)
+```
+
+#### Response Format Comparison
+
+**V1:**
+```json
+{"message": <data>}
+```
+
+**V2:**
+```json
+{"data": <data>, "message_log": []}
+```
+
+**Error V1:**
+```json
+{"exc_type": "ValidationError", "exception": "...traceback..."}
+```
+
+**Error V2:**
+```json
+{"errors": [{"type": "ValidationError", "message": "..."}]}
+```
+
+#### Calling DocType Methods via Postman
+
+```http
+POST /api/method/run_doc_method
+Content-Type: application/json
+Authorization: token api_key:api_secret
+
+{
+    "method": "calculate_tax",
+    "dt": "Sales Invoice",
+    "dn": "SI-2024-00001",
+    "args": {"tax_rate": 0.1}
+}
+```
+
+### Decorators in Frappe
+
+#### `@frappe.whitelist()`
+
+Registers a Python function as an HTTP endpoint. Without this decorator, the function cannot be called from the client.
+
+```python
+@frappe.whitelist()
+def my_function(param1, param2=None):
+    return {"result": param1}
+
+# Options:
+@frappe.whitelist(allow_guest=True)   # No authentication required
+@frappe.whitelist(methods=["POST"])   # Restrict HTTP methods
+```
+
+#### `@property` in DocType Controllers
+
+```python
+class SalesOrder(Document):
+    @property
+    def total_items(self):
+        """Computed property — not stored in DB"""
+        return len(self.items)
+    
+    @property
+    def is_overdue(self):
+        return self.delivery_date < frappe.utils.today() and self.docstatus == 1
+```
+
+Properties are computed on access, not stored. Useful for derived values that don't need persistence.
+
+#### `@frappe.rate_limit()`
+
+```python
+@frappe.whitelist(allow_guest=True)
+@frappe.rate_limit(limit=10, seconds=60)
+def public_endpoint():
+    pass
+```
+
+### Database Table Trimming
+
+Over time, DocType fields get removed but their database columns remain (Frappe never drops columns automatically for safety). Use `trim-tables` to clean up orphan columns.
+
+```bash
+# Preview what would be removed (safe — no changes)
+bench --site mysite trim-tables --dry-run
+
+# Execute trimming (creates backup first)
+bench --site mysite trim-tables
+
+# Skip backup (not recommended)
+bench --site mysite trim-tables --no-backup
+```
+
+```python
+from frappe.model.meta import trim_table, trim_tables
+
+# Check orphans for one DocType
+orphans = trim_table("Customer", dry_run=True)
+print(f"Orphan columns: {orphans}")
+
+# Remove orphans
+trim_table("Customer", dry_run=False)
+
+# Trim all tables
+trim_tables(dry_run=False)
+```
+
+**When to use:** After removing fields from DocTypes, after major ERPNext upgrades, when hitting the MySQL 65KB row size limit.
+
+**Row size limit:** MySQL/MariaDB has a 65KB per-row limit for VARCHAR columns. `Data`, `Link`, and `Select` fields use VARCHAR(140) which counts toward this limit. `Text` fields only use 10 bytes in-row.
+
+```python
+# Check row size utilization
+from frappe.core.doctype.doctype.doctype import get_row_size_utilization
+pct = get_row_size_utilization("Customer")
+print(f"Row size utilization: {pct}%")
+```
+
+### Frappe Architecture Summary
+
+```
+Browser (JavaScript)
+    ↓ frappe.call() / REST API
+Nginx (reverse proxy)
+    ↓
+Gunicorn (WSGI workers) ← Production
+Werkzeug (dev server)   ← Development
+    ↓
+Frappe WSGI App (frappe/app.py)
+    ↓
+Request Handler → Permission Check → Controller → Database
+    ↓
+MariaDB (per-site database)
+    ↑
+Redis Cache (shared) + Redis Queue (background jobs)
+    ↑
+Background Workers (RQ) + Scheduler
+    ↑
+Socket.IO (Node.js) ← Real-time events
+```

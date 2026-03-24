@@ -100,6 +100,30 @@ class Asset(Document):
 		if existing and existing != self.name:
 			frappe.throw(_("Asset with serial number {0} already exists: {1}").format(serial, existing))
 
+		# Check for duplicate asset with same item code
+		existing_asset = frappe.db.exists("Asset", {
+			"item_code": self.item_code,
+			"docstatus": ["!=", 2]  # Exclude cancelled assets
+		})
+		
+		if existing_asset and existing_asset != self.name:
+			frappe.throw(_("Asset with Item Code {0} already exists: {1}").format(
+				self.item_code, existing_asset
+			), frappe.DuplicateEntryError)
+	
+		# v16: Enhanced duplicate check with bulk operations
+		if hasattr(self, '_bulk_mode') and self._bulk_mode:
+			# Use bulk operation for better performance
+			duplicates = frappe.db.get_all("Asset", {
+				"item_code": self.item_code,
+				"docstatus": ["!=", 2]
+			}, fields=["name", "asset_name"])
+			
+			if duplicates:
+				frappe.throw(_("Multiple assets found with Item Code {0}").format(
+					self.item_code
+				), frappe.DuplicateEntryError)
+
 	def validate_status_transition(self):
 		"""Enforce valid status transitions on existing documents"""
 		if self.is_new():

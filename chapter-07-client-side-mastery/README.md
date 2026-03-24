@@ -1798,6 +1798,43 @@ Client-side mastery is crucial for creating responsive Frappe applications:
 
 ---
 
+## 📌 Addendum: API Correction — cur_frm.cscript is Deprecated
+
+### The Old vs Modern Client Script API
+
+The main chapter content uses `cur_frm.cscript.xxx = function(doc, cdt, cdn)` — this is the **legacy API** from Frappe v12 and earlier. It still works but is deprecated.
+
+The **modern API** (v13+) is `frappe.ui.form.on(doctype, { event(frm) {} })`. Always use this in new code:
+
+```javascript
+// ❌ Old (deprecated) — cur_frm.cscript pattern
+cur_frm.cscript.customer = function(doc, cdt, cdn) {
+    // handle customer field change
+};
+
+cur_frm.cscript.refresh = function(doc, cdt, cdn) {
+    // handle refresh
+};
+
+// ✅ Modern — frappe.ui.form.on pattern
+frappe.ui.form.on('Sales Order', {
+    customer(frm) {
+        // handle customer field change
+    },
+    refresh(frm) {
+        // handle refresh
+    }
+});
+```
+
+Key differences:
+- Modern API passes `frm` (the form object) — not `doc, cdt, cdn`
+- Multiple handlers for the same event are supported (old API overwrites)
+- Child table events use `frappe.ui.form.on('Child DocType', { field(frm, cdt, cdn) {} })`
+- `frm.doc` gives you the document (equivalent to old `doc`)
+
+---
+
 ## 📌 Addendum: frappe.ui.form.on vs frappe.provide, and Error Callbacks
 
 ### frappe.ui.form.on (Recommended — v14/v15)
@@ -1869,6 +1906,485 @@ frappe.call({
             message: __('Operation failed. Please check error logs.'),
             indicator: 'red'
         });
+    }
+});
+```
+
+
+---
+
+## Addendum: Source Article Insights
+
+### Child Table Client Scripting (cdt, cdn, locals)
+
+Child table scripting uses a three-argument pattern: `frm`, `cdt` (child doctype name), and `cdn` (child document name). The row data lives in `locals[cdt][cdn]`.
+
+```javascript
+// Register events on the child doctype, not the parent
+frappe.ui.form.on("Sales Order Item", {
+    item_code: function(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];  // Get the specific row
+
+        if (row.item_code) {
+            frappe.call({
+                method: "frappe.client.get",
+                args: { doctype: "Item", name: row.item_code },
+                callback: function(r) {
+                    if (r.message) {
+                        frappe.model.set_value(cdt, cdn, "item_name", r.message.item_name);
+                        frappe.model.set_value(cdt, cdn, "rate", r.message.standard_rate || 0);
+                        frappe.model.set_value(cdt, cdn, "uom", r.message.stock_uom);
+                    }
+                }
+            });
+        }
+    },
+
+    qty: function(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+        frappe.model.set_value(cdt, cdn, "amount", (row.qty || 0) * (row.rate || 0));
+        calculate_grand_total(frm);
+    },
+
+    // Row add/remove events use fieldname + "_add" / "_remove"
+    items_add: function(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+        // Set defaults for new rows
+        frappe.model.set_value(cdt, cdn, "warehouse", frm.doc.warehouse);
+    },
+
+    items_remove: function(frm, cdt, cdn) {
+        calculate_grand_total(frm);
+    }
+});
+
+function calculate_grand_total(frm) {
+    let total = (frm.doc.items || []).reduce((sum, row) => sum + (row.amount || 0), 0);
+    frm.set_value("grand_total", total);
+}
+```
+
+**Adding rows programmatically:**
+
+```javascript
+// Add a row with data
+let new_row = frappe.model.add_child(frm.doc, "Sales Order Item", "items");
+frappe.model.set_value(new_row.doctype, new_row.name, "item_code", "ITEM-001");
+frappe.model.set_value(new_row.doctype, new_row.name, "qty", 5);
+frm.refresh_field("items");
+
+// Or using Object.assign after add_child
+let row = frappe.model.add_child(frm.doc, "items", "items");
+Object.assign(row, { item_code: "ITEM-001", qty: 5, rate: 100 });
+frm.refresh_field("items");
+```
+
+**Filtering link fields in child tables:**
+
+```javascript
+frappe.ui.form.on("Sales Order", {
+    refresh: function(frm) {
+        frm.set_query("item_code", "items", function() {
+            return {
+                filters: { is_sales_item: 1, disabled: 0 }
+            };
+        });
+    }
+});
+```
+
+**Toggle column visibility in child table:**
+
+```javascript
+frm.fields_dict.items.grid.toggle_display("warehouse", show_warehouse);
+```
+
+**Duplicate check in child table:**
+
+```javascript
+frappe.ui.form.on("Sales Order Item", {
+    item_code: function(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+        let duplicates = frm.doc.items.filter(r => r.item_code === row.item_code && r.name !== row.name);
+        if (duplicates.length > 0) {
+            frappe.msgprint("Duplicate item found.");
+            frappe.model.set_value(cdt, cdn, "item_code", "");
+        }
+    }
+});
+```
+
+---
+
+### Custom Buttons: add_custom_button and make_custom_buttons
+
+**`frm.add_custom_button`** adds a button to the form toolbar. Buttons can be grouped under a dropdown label.
+
+```javascript
+frappe.ui.form.on("Sales Order", {
+    refresh: function(frm) {
+        // Simple button
+        frm.add_custom_button("Send Reminder", function() {
+            frappe.call({
+                method: "my_app.api.send_reminder",
+                args: { sales_order: frm.doc.name },
+                callback: r => frappe.show_alert("Reminder sent")
+            });
+        });
+
+        // Grouped button (appears in a dropdown)
+        frm.add_custom_button("Create Invoice", function() {
+            // action
+        }, "Create");  // third arg = group name
+
+        frm.add_custom_button("Create Delivery", function() {
+            // action
+        }, "Create");
+
+        // Style a button (btn-primary, btn-success, btn-danger, etc.)
+        frm.add_custom_button("Approve", function() {
+            // action
+        }).addClass("btn-success");
+    }
+});
+```
+
+**`frm.custom_make_buttons`** — declarative way to add "Make" buttons that create related documents. Frappe uses this pattern internally in ERPNext.
+
+```javascript
+frappe.ui.form.on("Sales Order", {
+    refresh: function(frm) {
+        // Only show when submitted
+        if (frm.doc.docstatus === 1) {
+            frm.custom_make_buttons = {
+                "Sales Invoice": "Make Invoice",
+                "Delivery Note": "Make Delivery"
+            };
+        }
+    }
+});
+```
+
+**`frm.make_custom_buttons`** (alternative pattern) — maps doctype to button label, shown only when submitted:
+
+```javascript
+frappe.ui.form.on("Purchase Order", {
+    refresh: function(frm) {
+        if (frm.doc.docstatus === 1) {
+            frm.make_custom_buttons = {
+                "Purchase Receipt": "Make Receipt",
+                "Purchase Invoice": "Make Invoice"
+            };
+        }
+    }
+});
+```
+
+**Remove a custom button:**
+
+```javascript
+frm.remove_custom_button("Send Reminder");
+// Or remove from a group:
+frm.remove_custom_button("Create Invoice", "Create");
+```
+
+---
+
+### Dialogs: frappe.ui.Dialog
+
+`frappe.ui.Dialog` creates modal dialogs with form fields. It's the standard way to collect user input before performing an action.
+
+```javascript
+frappe.ui.form.on("Sales Order", {
+    refresh: function(frm) {
+        frm.add_custom_button("Apply Discount", function() {
+            let d = new frappe.ui.Dialog({
+                title: "Apply Discount",
+                fields: [
+                    {
+                        label: "Discount Type",
+                        fieldname: "discount_type",
+                        fieldtype: "Select",
+                        options: ["Percentage\nFixed Amount"],
+                        default: "Percentage",
+                        reqd: 1
+                    },
+                    {
+                        label: "Discount Value",
+                        fieldname: "discount_value",
+                        fieldtype: "Float",
+                        reqd: 1
+                    },
+                    {
+                        label: "Reason",
+                        fieldname: "reason",
+                        fieldtype: "Small Text"
+                    }
+                ],
+                primary_action_label: "Apply",
+                primary_action: function(values) {
+                    // values contains the dialog field values
+                    frappe.call({
+                        method: "my_app.api.apply_discount",
+                        args: {
+                            sales_order: frm.doc.name,
+                            discount_type: values.discount_type,
+                            discount_value: values.discount_value,
+                            reason: values.reason
+                        },
+                        callback: function(r) {
+                            frm.reload_doc();
+                            d.hide();
+                        }
+                    });
+                }
+            });
+            d.show();
+        });
+    }
+});
+```
+
+**Prompt (quick single-field dialog):**
+
+```javascript
+frappe.prompt(
+    { label: "Reason for Cancellation", fieldname: "reason", fieldtype: "Small Text", reqd: 1 },
+    function(values) {
+        console.log(values.reason);
+    },
+    "Cancel Order",
+    "Confirm"
+);
+```
+
+**Confirm dialog:**
+
+```javascript
+frappe.confirm(
+    "Are you sure you want to delete all items?",
+    function() {
+        // on yes
+        frm.doc.items = [];
+        frm.refresh_field("items");
+    },
+    function() {
+        // on no (optional)
+    }
+);
+```
+
+**Dynamic field visibility in dialog:**
+
+```javascript
+let d = new frappe.ui.Dialog({
+    title: "Configure",
+    fields: [
+        { fieldname: "mode", fieldtype: "Select", label: "Mode", options: "Auto\nManual" },
+        { fieldname: "manual_value", fieldtype: "Float", label: "Value", depends_on: "eval:doc.mode=='Manual'" }
+    ],
+    primary_action: function(values) { d.hide(); }
+});
+d.show();
+```
+
+---
+
+### Form Field $wrapper (jQuery Manipulation)
+
+Every field in a Frappe form has a `$wrapper` property — a jQuery object wrapping the field's DOM element. This lets you inject HTML, apply CSS, or attach custom behavior.
+
+```javascript
+frappe.ui.form.on("Customer", {
+    refresh: function(frm) {
+        // Access the wrapper of a field
+        let $wrapper = frm.fields_dict.customer_name.$wrapper;
+
+        // Add a badge/indicator next to the field
+        $wrapper.find(".control-label").append(
+            '<span class="badge badge-info ml-2">VIP</span>'
+        );
+
+        // Inject custom HTML below the field input
+        $wrapper.find(".control-input").after(
+            '<div class="text-muted small mt-1">This name appears on all invoices</div>'
+        );
+
+        // Apply custom CSS
+        $wrapper.find("input").css({
+            "border-color": "#007bff",
+            "font-weight": "bold"
+        });
+    }
+});
+```
+
+**Inject a custom button inside a field wrapper:**
+
+```javascript
+frappe.ui.form.on("Sales Order", {
+    refresh: function(frm) {
+        let $input_area = frm.fields_dict.customer.$wrapper.find(".control-input");
+        $input_area.append(
+            $('<button class="btn btn-xs btn-default ml-2">View History</button>')
+                .on("click", function() {
+                    frappe.set_route("List", "Sales Order", { customer: frm.doc.customer });
+                })
+        );
+    }
+});
+```
+
+**Highlight a section:**
+
+```javascript
+frm.fields_dict.payment_section.$wrapper.css("background-color", "#fff3cd");
+```
+
+**Access the raw input element:**
+
+```javascript
+let input_el = frm.fields_dict.email.$wrapper.find("input")[0];
+input_el.setAttribute("placeholder", "Enter work email");
+```
+
+---
+
+### ListView Customization (doctype_list.js)
+
+Create a file at `your_app/public/js/{doctype_name}_list.js` (snake_case) to customize the list view for a DocType.
+
+```javascript
+// asset_list.js
+frappe.listview_settings["Asset"] = {
+    // Add extra fields to fetch (not shown as columns, but available in JS)
+    add_fields: ["status", "asset_category", "location"],
+
+    // Custom status indicator (colored dot in list)
+    get_indicator: function(doc) {
+        let color_map = {
+            "Draft": "grey",
+            "Submitted": "blue",
+            "In Maintenance": "orange",
+            "Scrapped": "red",
+            "Fully Depreciated": "green"
+        };
+        return [doc.status, color_map[doc.status] || "grey", "status,=," + doc.status];
+    },
+
+    // Run code when list view loads
+    onload: function(listview) {
+        // Add a custom filter button
+        listview.page.add_inner_button("My Assets", function() {
+            listview.filter_area.add([[
+                "Asset", "custodian", "=", frappe.session.user
+            ]]);
+        });
+    },
+
+    // Modify the query before it runs
+    before_render: function() {
+        // frappe.listview_settings["Asset"].filters = [["status", "!=", "Scrapped"]];
+    },
+
+    // Format a cell value
+    formatters: {
+        asset_value: function(value, df, doc) {
+            return frappe.format(value, { fieldtype: "Currency" });
+        }
+    },
+
+    // Right-click context menu items
+    get_form_link: function(doc) {
+        return `/app/asset/${doc.name}`;
+    }
+};
+```
+
+**Add a custom button to the list page:**
+
+```javascript
+frappe.listview_settings["Purchase Order"] = {
+    onload: function(listview) {
+        listview.page.add_action_item("Bulk Approve", function() {
+            let selected = listview.get_checked_items();
+            if (!selected.length) {
+                frappe.msgprint("Select at least one record.");
+                return;
+            }
+            frappe.call({
+                method: "my_app.api.bulk_approve",
+                args: { names: selected.map(d => d.name) },
+                callback: () => listview.refresh()
+            });
+        });
+    }
+};
+```
+
+---
+
+### Making Forms Read-Only
+
+Several methods exist to restrict editing at different granularities.
+
+**Disable the entire form (no editing, no save button):**
+
+```javascript
+frappe.ui.form.on("Sales Order", {
+    refresh: function(frm) {
+        if (frm.doc.locked_by_finance) {
+            frm.disable_form();
+            frm.set_intro("This order is locked by Finance.", "orange");
+        }
+    }
+});
+```
+
+**Disable save only (form is editable but can't be saved):**
+
+```javascript
+frm.disable_save();
+```
+
+**Make a specific field read-only dynamically:**
+
+```javascript
+frm.set_df_property("discount_percentage", "read_only", 1);
+// Reverse it:
+frm.set_df_property("discount_percentage", "read_only", 0);
+```
+
+**Make all fields read-only (but keep buttons):**
+
+```javascript
+frm.set_read_only();
+```
+
+**Conditionally lock fields based on status:**
+
+```javascript
+frappe.ui.form.on("Purchase Order", {
+    refresh: function(frm) {
+        if (frm.doc.docstatus === 1) {
+            // Lock specific fields after submission
+            ["supplier", "schedule_date", "currency"].forEach(f => {
+                frm.set_df_property(f, "read_only", 1);
+            });
+        }
+    }
+});
+```
+
+**Read-only based on user role:**
+
+```javascript
+frappe.ui.form.on("Employee", {
+    refresh: function(frm) {
+        if (!frappe.user.has_role("HR Manager")) {
+            frm.set_df_property("salary", "read_only", 1);
+            frm.set_df_property("bank_account", "read_only", 1);
+        }
     }
 });
 ```

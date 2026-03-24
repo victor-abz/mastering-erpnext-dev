@@ -1566,3 +1566,487 @@ Mastering API development is essential for building integrations:
 ---
 
 **Next Chapter**: Advanced reporting and data visualization techniques.
+
+
+---
+
+## Addendum: Practical API Patterns from the Field
+
+### REST vs RPC — The Core Decision
+
+Frappe exposes two primary API styles. Choosing the right one matters:
+
+| Style | URL Pattern | Use When |
+|-------|-------------|----------|
+| REST | `/api/resource/<DocType>` | Standard CRUD on a single DocType |
+| RPC | `/api/method/<function>` | Custom logic, calculations, multi-step workflows |
+
+**Quick decision tree:**
+```
+Need real-time updates? → WebSocket (frappe.publish_realtime)
+Working with a DocType (CRUD)? → REST (/api/resource/DocType)
+Custom logic / calculations? → RPC (/api/method/function_name)
+```
+
+### API Versioning
+
+Frappe supports two API versions simultaneously:
+
+```
+/api/resource/<DocType>        # V1 (legacy, still works)
+/api/v2/document/<DocType>     # V2 (structured responses, PATCH support)
+```
+
+V2 response format:
+```json
+// Success
+{ "data": {...}, "message_log": [] }
+
+// Error
+{ "errors": [{ "type": "ValidationError", "message": "..." }] }
+```
+
+### Authentication Methods
+
+```bash
+# API Key (recommended for integrations)
+curl -H "Authorization: token api_key:api_secret" \
+  https://your-site.com/api/resource/Customer
+
+# Session (browser-based)
+curl -X POST https://your-site.com/api/method/login \
+  -d "usr=admin&pwd=password" -c cookies.txt
+
+curl -b cookies.txt https://your-site.com/api/resource/Customer
+
+# OAuth Bearer
+curl -H "Authorization: Bearer <access_token>" \
+  https://your-site.com/api/resource/Customer
+```
+
+### Building Whitelisted Methods
+
+```python
+import frappe
+from frappe.rate_limiter import rate_limit
+
+# Basic whitelisted method
+@frappe.whitelist()
+def get_customer_summary(customer):
+    if not frappe.db.exists("Customer", customer):
+        frappe.throw("Customer not found", frappe.DoesNotExistError)
+
+    return {
+        "customer": customer,
+        "total_orders": frappe.db.count("Sales Order", {"customer": customer, "docstatus": 1}),
+        "outstanding": frappe.db.get_value("Customer", customer, "outstanding_amount") or 0
+    }
+
+# Restrict to POST only
+@frappe.whitelist(methods=["POST"])
+def create_order(customer, items):
+    if not frappe.has_permission("Sales Order", "create"):
+        frappe.throw("No permission", frappe.PermissionError)
+
+    order = frappe.get_doc({
+        "doctype": "Sales Order",
+        "customer": customer,
+        "items": items
+    })
+    order.insert()
+    return {"order_id": order.name}
+
+# Allow guest access (public endpoints)
+@frappe.whitelist(allow_guest=True)
+def get_public_catalog():
+    return frappe.get_all("Item",
+        filters={"is_sales_item": 1, "disabled": 0},
+        fields=["name", "item_name", "standard_rate"],
+        limit=100
+    )
+
+# Rate-limited endpoint
+@frappe.whitelist(allow_guest=True)
+@rate_limit(limit=5, seconds=60)
+def send_otp(mobile):
+    # Limited to 5 requests per minute
+    return {"status": "OTP sent"}
+```
+
+### Consuming APIs from JavaScript
+
+```javascript
+// frappe.call — standard approach
+frappe.call({
+    method: 'myapp.api.get_customer_summary',
+    args: { customer: 'CUST-001' },
+    freeze: true,
+    freeze_message: __('Loading...'),
+    callback(r) {
+        if (!r.exc) {
+            console.log(r.message);
+        }
+    }
+});
+
+// frappe.xcall — async/await
+async function loadSummary(customer) {
+    try {
+        const data = await frappe.xcall('myapp.api.get_customer_summary', { customer });
+        return data;
+    } catch (err) {
+        frappe.msgprint(__('Failed to load summary'));
+    }
+}
+
+// Fetch with CSRF token
+const response = await fetch('/api/method/myapp.api.create_order', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+        'X-Frappe-CSRF-Token': frappe.csrf_token
+    },
+    body: JSON.stringify({ customer: 'CUST-001', items: [] })
+});
+const data = await response.json();
+```
+
+### Consuming APIs from Python (External)
+
+```python
+import requests
+
+class FrappeClient:
+    def __init__(self, base_url, api_key, api_secret):
+        self.base_url = base_url
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Authorization": f"token {api_key}:{api_secret}"
+        })
+
+    def get_list(self, doctype, filters=None, fields=None, limit=20):
+        params = {"limit_page_length": limit}
+        if filters:
+            import json
+            params["filters"] = json.dumps(filters)
+        if fields:
+            params["fields"] = json.dumps(fields)
+
+        r = self.session.get(f"{self.base_url}/api/resource/{doctype}", params=params)
+        r.raise_for_status()
+        return r.json()["message"]
+
+    def call_method(self, method, **kwargs):
+        r = self.session.post(f"{self.base_url}/api/method/{method}", json=kwargs)
+        r.raise_for_status()
+        return r.json().get("message")
+
+# Usage
+client = FrappeClient("https://your-site.com", "api_key", "api_secret")
+customers = client.get_list("Customer", filters={"disabled": 0}, fields=["name", "customer_name"])
+```
+
+### Integration Request — Logging External API Calls
+
+Always use `Integration Request` to log outbound API calls. It gives you a full audit trail and makes debugging trivial.
+
+```python
+from frappe.integrations.utils import create_request_log
+
+def call_payment_gateway(payload, invoice_name):
+    """Make external API call with full logging"""
+    integration_request = create_request_log(
+        data=payload,
+        service_name="Payment Gateway",
+        request_headers={"Authorization": "Bearer token"},
+        reference_doctype="Sales Invoice",
+        reference_docname=invoice_name
+    )
+
+    try:
+        import requests
+        response = requests.post(
+            "https://api.payment-gateway.com/charge",
+            json=payload,
+            timeout=30
+        )
+        response.raise_for_status()
+        integration_request.handle_success(response.json())
+        return response.json()
+
+    except requests.exceptions.Timeout:
+        integration_request.handle_failure({"error": "Request timeout"})
+        raise
+    except requests.exceptions.HTTPError as e:
+        integration_request.handle_failure({
+            "error": f"HTTP {e.response.status_code}: {e.response.text}"
+        })
+        raise
+    except Exception as e:
+        integration_request.handle_failure({"error": str(e)})
+        raise
+```
+
+**Query failed integrations:**
+```python
+# Find all failed calls for a service
+failed = frappe.get_all(
+    "Integration Request",
+    filters={"integration_request_service": "Payment Gateway", "status": "Failed"},
+    fields=["name", "error", "reference_docname", "creation"]
+)
+
+# Retry a failed request
+def retry_integration(request_name):
+    doc = frappe.get_doc("Integration Request", request_name)
+    doc.status = "Queued"
+    doc.error = None
+    doc.save()
+    # Re-enqueue processing
+
+# Clean up old logs
+from frappe.query_builder.functions import Now
+from frappe.query_builder import Interval
+
+table = frappe.qb.DocType("Integration Request")
+frappe.db.delete(table, filters=(
+    (table.integration_request_service == "Payment Gateway") &
+    (table.modified < (Now() - Interval(days=30)))
+))
+```
+
+### Webhooks — Push vs Pull
+
+Webhooks are the push counterpart to REST APIs. Instead of polling for changes, the sender POSTs data to your endpoint when an event occurs.
+
+```
+API (pull):     Your app → requests data → External service responds
+Webhook (push): External service → POSTs data → Your endpoint
+```
+
+**Receiving a webhook in Frappe:**
+```python
+@frappe.whitelist(allow_guest=True)
+def receive_webhook():
+    """Endpoint that receives incoming webhooks"""
+    import json
+
+    # Parse the incoming payload
+    payload = frappe.request.get_data()
+    data = json.loads(frappe.safe_decode(payload))
+
+    # Log it via Integration Request
+    integration_request = create_request_log(
+        data=data,
+        service_name="GitHub Webhook",
+        is_remote_request=0  # incoming, not outgoing
+    )
+
+    try:
+        # Validate signature (important for security)
+        signature = frappe.request.headers.get("X-Hub-Signature-256")
+        if not validate_webhook_signature(payload, signature):
+            frappe.throw("Invalid signature", frappe.AuthenticationError)
+
+        # Process the event
+        event_type = frappe.request.headers.get("X-GitHub-Event")
+        process_github_event(event_type, data)
+
+        integration_request.handle_success({"processed": True})
+        return {"status": "ok"}
+
+    except Exception as e:
+        integration_request.handle_failure({"error": str(e)})
+        raise
+
+def validate_webhook_signature(payload, signature):
+    import hmac, hashlib
+    secret = frappe.conf.get("github_webhook_secret", "").encode()
+    expected = "sha256=" + hmac.new(secret, payload, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature or "")
+```
+
+**Sending a webhook from Frappe:**
+```python
+# hooks.py — trigger on document events
+doc_events = {
+    "Sales Order": {
+        "on_submit": "myapp.webhooks.notify_erp_system"
+    }
+}
+```
+
+```python
+# myapp/webhooks.py
+import frappe
+import requests
+from frappe.integrations.utils import create_request_log
+
+def notify_erp_system(doc, method):
+    payload = {
+        "event": "sales_order_submitted",
+        "order_id": doc.name,
+        "customer": doc.customer,
+        "total": doc.grand_total
+    }
+
+    webhook_url = frappe.conf.get("erp_webhook_url")
+    if not webhook_url:
+        return
+
+    integration_request = create_request_log(
+        data=payload,
+        service_name="ERP Webhook",
+        reference_doctype=doc.doctype,
+        reference_docname=doc.name
+    )
+
+    try:
+        r = requests.post(webhook_url, json=payload, timeout=10)
+        r.raise_for_status()
+        integration_request.handle_success(r.json())
+    except Exception as e:
+        integration_request.handle_failure({"error": str(e)})
+        # Don't raise — webhook failure shouldn't block the submit
+        frappe.log_error(f"Webhook failed: {e}", "ERP Webhook")
+```
+
+### Clean Architecture for APIs
+
+Separate HTTP handling from business logic so your services can be reused from background jobs, scheduled tasks, and other APIs.
+
+```
+myapp/
+├── api/
+│   └── orders.py        # HTTP layer — request/response only
+├── services/
+│   └── order_service.py # Business logic — reusable
+└── utils/
+    └── validators.py    # Shared validation
+```
+
+```python
+# api/orders.py — thin HTTP layer
+@frappe.whitelist(methods=["POST"])
+def create_order(customer, items, delivery_date=None):
+    from myapp.services.order_service import OrderService
+    from myapp.utils.validators import validate_customer
+
+    validate_customer(customer)
+    order = OrderService().create_order(customer, items, delivery_date)
+    return {"success": True, "order_id": order.name}
+```
+
+```python
+# services/order_service.py — reusable business logic
+class OrderService:
+    def create_order(self, customer, items, delivery_date=None):
+        from frappe.utils import nowdate, add_days
+
+        if not delivery_date:
+            delivery_date = add_days(nowdate(), 7)
+
+        self._validate_stock(items)
+
+        order = frappe.get_doc({
+            "doctype": "Sales Order",
+            "customer": customer,
+            "delivery_date": delivery_date,
+            "items": items
+        })
+        order.insert()
+        order.submit()
+        return order
+
+    def _validate_stock(self, items):
+        for item in items:
+            available = frappe.db.get_value("Bin",
+                {"item_code": item["item_code"]}, "actual_qty") or 0
+            if available < item["qty"]:
+                frappe.throw(
+                    f"Insufficient stock for {item['item_code']}. "
+                    f"Available: {available}, Required: {item['qty']}"
+                )
+```
+
+### Response Best Practices
+
+```python
+# Consistent response format
+@frappe.whitelist()
+def get_customer(customer_id):
+    try:
+        doc = frappe.get_doc("Customer", customer_id)
+        return {"success": True, "data": doc.as_dict()}
+    except frappe.DoesNotExistError:
+        frappe.response.http_status_code = 404
+        return {"success": False, "message": "Customer not found"}
+
+# Pagination
+@frappe.whitelist()
+def list_customers(page=1, page_size=20):
+    page, page_size = int(page), min(int(page_size), 100)
+    start = (page - 1) * page_size
+
+    data = frappe.get_all("Customer",
+        fields=["name", "customer_name", "email_id"],
+        start=start, page_length=page_size)
+    total = frappe.db.count("Customer")
+
+    return {
+        "data": data,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": (total + page_size - 1) // page_size
+    }
+
+# Caching expensive responses
+@frappe.whitelist()
+def get_dashboard_stats():
+    cache_key = f"dashboard_stats_{frappe.session.user}"
+    cached = frappe.cache().get_value(cache_key)
+    if cached:
+        return cached
+
+    stats = {
+        "total_customers": frappe.db.count("Customer"),
+        "open_orders": frappe.db.count("Sales Order", {"status": "To Deliver and Bill"}),
+    }
+    frappe.cache().set_value(cache_key, stats, expires_in_sec=300)
+    return stats
+```
+
+### CORS Configuration
+
+```json
+// site_config.json
+{
+    "allow_cors": ["https://app.example.com", "https://admin.example.com"]
+}
+```
+
+### Rate Limiting Reference
+
+```python
+from frappe.rate_limiter import rate_limit
+
+# Simple limit: 10 requests per hour
+@frappe.whitelist()
+@rate_limit(limit=10, seconds=3600)
+def sensitive_endpoint():
+    pass
+
+# Key-based: limit per email parameter
+@frappe.whitelist(allow_guest=True)
+@rate_limit(key="email", limit=5, seconds=60)
+def request_password_reset(email):
+    pass
+```
+
+When exceeded, Frappe returns `429 Too Many Requests` with headers:
+```
+X-RateLimit-Limit: 10
+X-RateLimit-Remaining: 0
+Retry-After: 3600
+```

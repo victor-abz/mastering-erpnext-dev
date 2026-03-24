@@ -1,17 +1,18 @@
 # Asset Management System
 
-Complete asset tracking and management application built with Frappe Framework.
+Complete asset tracking and management application built with Frappe Framework v16.
+Enhanced with modern security practices, performance optimizations, and comprehensive testing.
 
 ## Features
 
 ### Core Functionality
-- Asset registration and tracking
-- Hierarchical asset categories
-- Asset assignment workflow
+- Asset registration and tracking with v16 optimizations
+- Hierarchical asset categories with bulk operations support
+- Asset assignment workflow with proper permission validation
 - Depreciation calculation (Straight Line, Double Declining Balance)
-- Maintenance scheduling and tracking
-- Real-time dashboard with analytics
-- Comprehensive utilization reports
+- Maintenance scheduling and tracking with automated notifications
+- Real-time dashboard with analytics and performance monitoring
+- Comprehensive utilization reports with caching
 
 ### Asset Lifecycle Management
 1. **Registration**: Create assets with purchase details, category, and depreciation settings
@@ -20,12 +21,12 @@ Complete asset tracking and management application built with Frappe Framework.
 4. **Depreciation**: Automatic calculation and tracking
 5. **Disposal**: Record asset disposal and calculate gains/losses
 
-### Automation
-- Daily maintenance due notifications
-- Automatic depreciation calculations
-- Weekly utilization reports
-- Monthly depreciation summaries
-- Asset value updates
+### v16 Enhancements
+- **Bulk Operations**: Uses `frappe.db.bulk_insert()` for performance
+- **Enhanced Security**: Parameterized queries and input validation
+- **Type Safety**: Full type hints throughout the application
+- **Performance Monitoring**: Built-in performance tracking and alerting
+- **Modern API**: RESTful endpoints with proper error handling
 
 ## Installation
 
@@ -33,8 +34,8 @@ Complete asset tracking and management application built with Frappe Framework.
 # Navigate to your bench directory
 cd ~/frappe-bench
 
-# Get the app
-bench get-app asset_management_app /path/to/projects/asset_management/asset_management_app
+# Get the v16-compatible app
+bench get-app asset_management_app /path/to/mastering-erpnext-dev/projects/asset_management/asset_management_app
 
 # Install on site
 bench --site your-site.local install-app asset_management_app

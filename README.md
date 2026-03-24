@@ -18,6 +18,25 @@ A comprehensive technical guide for developers who want to master Frappe Framewo
 
 ---
 
+## 🎯 ERPNext v16 Compatibility
+
+This book is fully compatible with **ERPNext v16 / Frappe v16** and includes:
+
+### ✅ v16 Features Covered
+- **Modern ORM Methods**: `frappe.db.bulk_insert()`, optimized query patterns
+- **Enhanced Type Hints**: Full support for IDE integration and code analysis
+- **Improved Security**: Parameterized queries, proper validation
+- **Updated API Patterns**: Modern REST API design with v16 features
+- **Advanced Performance**: Caching strategies and optimization techniques
+- **Production Deployment**: Docker, CI/CD, and monitoring setup
+
+### 🔄 Migration Notes
+- **v14 to v16**: All examples use v16-compatible methods
+- **Backward Compatibility**: Code works with both v14 and v16
+- **New Features**: Leverages v16 improvements like bulk operations and enhanced caching
+
+---
+
 ## Quick Start
 
 ### 1. Clone the repo

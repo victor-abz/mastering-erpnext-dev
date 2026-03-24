@@ -2275,3 +2275,280 @@ Building a complete e-commerce platform requires:
 ---
 
 **Next Chapter**: CRM system development with customer relationship management automation.
+
+
+---
+
+## Addendum: Practical E-commerce Patterns in Frappe
+
+### Exposing Product Catalog via API
+
+```python
+import frappe
+from frappe.rate_limiter import rate_limit
+
+@frappe.whitelist(allow_guest=True)
+def get_catalog(category=None, page=1, page_size=20):
+    """Public product catalog endpoint"""
+    page, page_size = int(page), min(int(page_size), 100)
+    filters = {"show_in_website": 1, "disabled": 0}
+    if category:
+        filters["item_group"] = category
+
+    items = frappe.get_all("Item",
+        filters=filters,
+        fields=["name", "item_name", "item_group", "standard_rate", "image", "description"],
+        start=(page - 1) * page_size,
+        page_length=page_size,
+        order_by="item_name"
+    )
+
+    # Attach stock status
+    for item in items:
+        item["in_stock"] = get_stock_status(item["name"])
+
+    return {
+        "items": items,
+        "page": page,
+        "total": frappe.db.count("Item", filters)
+    }
+
+def get_stock_status(item_code):
+    warehouse = frappe.db.get_single_value("Website Settings", "default_warehouse")
+    qty = frappe.db.get_value("Bin",
+        {"item_code": item_code, "warehouse": warehouse}, "actual_qty") or 0
+    return qty > 0
+```
+
+### Shopping Cart with Integration Request Logging
+
+```python
+@frappe.whitelist()
+def add_to_cart(item_code, qty=1):
+    """Add item to cart, log via Integration Request"""
+    from frappe.integrations.utils import create_request_log
+
+    # Validate stock
+    if not get_stock_status(item_code):
+        frappe.throw(f"{item_code} is out of stock")
+
+    # Get or create cart (stored in Quotation in ERPNext)
+    cart = get_or_create_cart()
+
+    # Check if item already in cart
+    existing = next((i for i in cart.items if i.item_code == item_code), None)
+    if existing:
+        existing.qty += int(qty)
+    else:
+        cart.append("items", {
+            "item_code": item_code,
+            "qty": int(qty),
+            "rate": frappe.db.get_value("Item Price",
+                {"item_code": item_code, "price_list": "Standard Selling"}, "price_list_rate") or 0
+        })
+
+    cart.save(ignore_permissions=True)
+    return {"cart_id": cart.name, "item_count": len(cart.items)}
+
+def get_or_create_cart():
+    """Get active cart (Quotation) for current user"""
+    existing = frappe.get_all("Quotation",
+        filters={"quotation_to": "Customer", "status": "Draft",
+                 "owner": frappe.session.user},
+        limit=1)
+
+    if existing:
+        return frappe.get_doc("Quotation", existing[0].name)
+
+    cart = frappe.new_doc("Quotation")
+    cart.quotation_to = "Customer"
+    cart.order_type = "Shopping Cart"
+    cart.insert(ignore_permissions=True)
+    return cart
+```
+
+### Payment Gateway Integration with Audit Trail
+
+```python
+@frappe.whitelist(methods=["POST"])
+def process_payment(cart_id, payment_method, payment_data):
+    """Process payment and log via Integration Request"""
+    from frappe.integrations.utils import create_request_log
+    import json
+
+    cart = frappe.get_doc("Quotation", cart_id)
+    payload = {
+        "amount": cart.grand_total,
+        "currency": frappe.db.get_default("currency"),
+        "payment_method": payment_method,
+        "reference": cart_id
+    }
+
+    integration_request = create_request_log(
+        data=payload,
+        service_name=f"Payment-{payment_method}",
+        reference_doctype="Quotation",
+        reference_docname=cart_id
+    )
+
+    try:
+        # Call payment gateway
+        result = _call_payment_gateway(payment_method, payload, payment_data)
+
+        integration_request.handle_success(result)
+
+        # Convert cart to Sales Order on success
+        order = _convert_cart_to_order(cart, result)
+        return {"success": True, "order_id": order.name}
+
+    except Exception as e:
+        integration_request.handle_failure({"error": str(e)})
+        frappe.log_error(f"Payment failed for {cart_id}: {e}", "Payment Error")
+        frappe.throw("Payment processing failed. Please try again.")
+
+def _convert_cart_to_order(cart, payment_result):
+    """Convert approved cart to Sales Order"""
+    order = frappe.new_doc("Sales Order")
+    order.customer = cart.party_name or frappe.session.user
+    order.transaction_date = frappe.utils.nowdate()
+    order.delivery_date = frappe.utils.add_to_date(frappe.utils.nowdate(), days=7)
+
+    for item in cart.items:
+        order.append("items", {
+            "item_code": item.item_code,
+            "qty": item.qty,
+            "rate": item.rate,
+            "delivery_date": order.delivery_date
+        })
+
+    order.insert()
+    order.submit()
+
+    # Mark cart as ordered
+    cart.status = "Ordered"
+    cart.save(ignore_permissions=True)
+
+    return order
+```
+
+### Webhook for Order Status Updates
+
+```python
+# hooks.py
+doc_events = {
+    "Sales Order": {
+        "on_submit": "myapp.ecommerce.webhooks.notify_fulfillment_system",
+        "on_update": "myapp.ecommerce.webhooks.notify_order_update"
+    }
+}
+```
+
+```python
+# myapp/ecommerce/webhooks.py
+import frappe
+import requests
+from frappe.integrations.utils import create_request_log
+
+def notify_fulfillment_system(doc, method):
+    """Push new orders to fulfillment system"""
+    webhook_url = frappe.conf.get("fulfillment_webhook_url")
+    if not webhook_url:
+        return
+
+    payload = {
+        "event": "order_submitted",
+        "order_id": doc.name,
+        "customer": doc.customer,
+        "items": [{"item_code": i.item_code, "qty": i.qty} for i in doc.items],
+        "total": doc.grand_total
+    }
+
+    integration_request = create_request_log(
+        data=payload,
+        service_name="Fulfillment Webhook",
+        reference_doctype=doc.doctype,
+        reference_docname=doc.name
+    )
+
+    try:
+        r = requests.post(webhook_url, json=payload, timeout=10)
+        r.raise_for_status()
+        integration_request.handle_success(r.json())
+    except Exception as e:
+        integration_request.handle_failure({"error": str(e)})
+        # Don't raise — webhook failure shouldn't block order submission
+        frappe.log_error(f"Fulfillment webhook failed: {e}", "Webhook Error")
+```
+
+### Inventory Sync via Background Job
+
+```python
+# hooks.py
+scheduler_events = {
+    "every_30_minutes": ["myapp.ecommerce.inventory.sync_stock_levels"]
+}
+```
+
+```python
+# myapp/ecommerce/inventory.py
+import frappe
+
+def sync_stock_levels():
+    """Sync stock levels to website cache"""
+    items = frappe.get_all("Item",
+        filters={"show_in_website": 1, "disabled": 0},
+        fields=["name"])
+
+    warehouse = frappe.db.get_single_value("Website Settings", "default_warehouse")
+
+    for item in items:
+        qty = frappe.db.get_value("Bin",
+            {"item_code": item.name, "warehouse": warehouse}, "actual_qty") or 0
+
+        # Cache stock status in Redis for fast reads
+        cache_key = f"stock_status_{item.name}"
+        frappe.cache().set_value(cache_key, {"qty": qty, "in_stock": qty > 0},
+                                  expires_in_sec=1800)
+
+@frappe.whitelist(allow_guest=True)
+def get_stock_status_cached(item_code):
+    """Fast stock check using Redis cache"""
+    cache_key = f"stock_status_{item_code}"
+    cached = frappe.cache().get_value(cache_key)
+    if cached:
+        return cached
+
+    # Fallback to DB
+    warehouse = frappe.db.get_single_value("Website Settings", "default_warehouse")
+    qty = frappe.db.get_value("Bin",
+        {"item_code": item_code, "warehouse": warehouse}, "actual_qty") or 0
+    return {"qty": qty, "in_stock": qty > 0}
+```
+
+### Performance Tips for E-commerce
+
+```python
+# Batch product loading — avoid N+1 queries
+def get_products_with_pricing(item_codes):
+    """Load products and prices in two queries instead of N+1"""
+    items = frappe.get_all("Item",
+        filters={"name": ["in", item_codes]},
+        fields=["name", "item_name", "image", "item_group"])
+
+    # Single query for all prices
+    prices = {
+        row.item_code: row.price_list_rate
+        for row in frappe.db.sql("""
+            SELECT item_code, price_list_rate
+            FROM `tabItem Price`
+            WHERE item_code IN %(codes)s
+            AND price_list = 'Standard Selling'
+            AND (valid_upto IS NULL OR valid_upto >= CURDATE())
+        """, {"codes": item_codes}, as_dict=True)
+    }
+
+    for item in items:
+        item["price"] = prices.get(item.name, 0)
+
+    return items
+```

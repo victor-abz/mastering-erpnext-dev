@@ -252,3 +252,113 @@ Frappe's i18n system is simple by design:
 ---
 
 **Next Chapter**: Virtual DocTypes and Virtual Fields — working with data that doesn't live in the database.
+
+
+---
+
+## 📌 Addendum: How to Add Translations in Frappe
+
+### Step 1: Create the `translations` Folder
+
+```
+apps/your_app/your_app/translations/
+```
+
+Frappe automatically detects this folder — no extra setup needed.
+
+### Step 2: Add Translation CSV Files
+
+Create a CSV file for each language:
+- `ar.csv` (Arabic)
+- `es.csv` (Spanish)
+- `fr.csv` (French)
+
+**CSV Structure:**
+
+```csv
+"source_string","translated_string","context"
+"Welcome","مرحبا",""
+"Save","حفظ",""
+"charge","شحن","mobile phone charge"
+"charge","رسوم","invoice line"
+```
+
+Columns:
+1. `source_string` — the original string used in code (`_("Welcome")`)
+2. `translated_string` — the translated version
+3. `context` — optional, clarifies meaning when same word has different translations
+
+### Step 3: Use Translatable Strings in Code
+
+**Python:**
+```python
+from frappe import _
+
+def my_function():
+    message = _("Welcome")  # → "مرحبا" for Arabic users
+    
+    # With context (when same word has different meanings)
+    charge_type = _("charge", context="mobile phone charge")  # → "شحن"
+    fee = _("charge", context="invoice line")                  # → "رسوم"
+```
+
+**JavaScript:**
+```javascript
+// In client scripts
+frappe.msgprint(__("Welcome"));
+frappe.msgprint(__("charge", null, "mobile phone charge"));
+```
+
+### Step 4: Apply Changes
+
+Frappe loads translations dynamically at runtime — no migration needed.
+
+```bash
+# Clear cache if translations don't reflect immediately
+bench --site your-site clear-cache
+
+# Only needed if you changed custom frontend JS files using __()
+bench --site your-site build
+```
+
+### Step 5: Test
+
+Switch user language to Arabic (or target language) in:
+`Settings → My Settings → Language`
+
+### Key Notes
+
+- CSV filenames must match Frappe's language codes (`ar`, `es`, `fr`, etc.)
+- The `translations` folder must be at the root of your app's package directory
+- Translations are cached — clear cache after editing
+- If a string isn't translated, Frappe falls back to the original string
+- Language codes can be found in `Frappe > Language` DocType
+
+### `frappe.get_untranslated` Command
+
+Find strings in your app that haven't been translated yet:
+
+```bash
+bench --site your-site frappe.get_untranslated ar your_app
+```
+
+This outputs all strings marked with `_()` that don't have an Arabic translation, helping you identify gaps in your translation files.
+
+### Complete Example
+
+```
+apps/my_app/my_app/translations/ar.csv:
+"welcome_message","مرحبا بك!",""
+"save_success","تم الحفظ بنجاح",""
+"delete_confirm","هل أنت متأكد من الحذف؟",""
+```
+
+```python
+# In Python code
+frappe.msgprint(_("welcome_message"))  # → "مرحبا بك!"
+```
+
+```javascript
+// In JavaScript
+frappe.show_alert({message: __("save_success"), indicator: "green"});
+```

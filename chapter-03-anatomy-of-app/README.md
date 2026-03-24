@@ -1072,3 +1072,248 @@ A quick way to create missing `__init__.py` files across your app:
 ```bash
 find apps/my_custom_app -type d -exec touch {}/__init__.py \;
 ```
+
+
+---
+
+## Addendum: Source Article Insights
+
+### Professional App Boilerplate Setup
+
+When you run `bench new-app your-app-name`, Frappe creates a skeleton. Here's the professional setup process to make it production-ready.
+
+**Step 1: Create the app**
+```bash
+bench new-app your_app_name
+# App Title: Your App Name
+# App Description: Comprehensive description
+# App Publisher: Your Organization
+# App Email: contact@yourorg.com
+# App License: MIT
+```
+
+**Step 2: Set up `setup.py` properly**
+```python
+from setuptools import setup, find_packages
+from your_app import __version__ as version
+
+with open("requirements.txt") as f:
+    install_requires = f.read().strip().split("\n")
+
+setup(
+    name="your_app_name",
+    version=version,
+    description="Your comprehensive app description",
+    author="Your Organization",
+    author_email="contact@yourorg.com",
+    packages=find_packages(),
+    zip_safe=False,
+    include_package_data=True,
+    install_requires=install_requires
+)
+```
+`setup.py` is the identity card of your app — without it, dependencies won't install automatically, version tracking for patches may fail, and deployment won't work properly.
+
+**Step 3: Version and constants**
+
+Start at `0.1.0` not `0.0.1` — `0.0.x` signals "barely started", `0.1.0` signals "early but usable":
+
+```python
+# your_app/__init__.py
+from .constants import *
+
+__version__ = "0.1.0"
+```
+
+```python
+# your_app/constants.py
+APP_NAME = "Your App Name"
+APP_VERSION = "0.1.0"
+
+ERRORS = {
+    "no_permission": "Insufficient permissions"
+}
+
+DEFAULT_PAGE_SIZE = 20
+MAX_UPLOAD_SIZE = 10485760  # 10MB
+API_VERSION = "v1"
+DEFAULT_TIMEOUT = 30
+```
+
+Import via `__init__.py` so you can call constants directly:
+```python
+import my_app, frappe
+frappe.throw(_(my_app.ERRORS.get("no_permission")))
+```
+
+**Step 4: `requirements.txt`**
+```txt
+# frappe -- https://github.com/frappe/frappe is installed via 'bench init'
+# Add your app-specific dependencies here:
+# requests>=2.28.0
+# pandas>=1.5.0
+```
+
+**Step 5: Branding in `hooks.py`**
+```python
+# hooks.py
+app_logo_url = "/assets/your_app/images/branding/logo.png"
+
+website_context = {
+    "favicon": "/assets/your_app/images/branding/favicon.png",
+    "splash_image": "/assets/your_app/images/branding/logo.png"
+}
+
+# Installation hooks
+after_migrate = "your_app.utils.install.after_migrate"
+```
+
+**Step 6: Installation automation**
+```python
+# your_app/utils/install.py
+import frappe
+
+def after_install():
+    set_app_logo()
+    set_system_settings()
+    set_navbar_settings()
+    set_website_settings()
+
+def after_migrate():
+    set_app_logo()
+    set_system_settings()
+    set_navbar_settings()
+    set_website_settings()
+
+def set_app_logo():
+    app_logo = frappe.get_hooks("app_logo_url")[-1]
+    frappe.db.set_single_value("Navbar Settings", "app_logo", app_logo)
+
+def set_system_settings():
+    settings = frappe.get_doc("System Settings")
+    settings.session_expiry = "12:00"
+    settings.login_with_email_link = False
+    settings.allow_guests_to_upload_files = True
+    settings.link_field_results_limit = 10
+    settings.save()
+
+def set_website_settings():
+    settings = frappe.get_doc("Website Settings")
+    settings.app_name = "Your App Name"
+    settings.home_page = "login"
+    settings.hide_footer_signup = True
+    settings.save()
+```
+
+**Step 7: Directory structure**
+```
+your_app/
+├── __init__.py              # Package init + version
+├── hooks.py                 # Frappe hooks
+├── constants.py             # App constants
+├── modules.txt              # Module definitions
+├── patches.txt              # Database patches
+├── api/
+│   └── v1/
+│       ├── __init__.py
+│       ├── auth.py
+│       └── main.py
+├── public/
+│   └── images/
+│       └── branding/
+│           ├── favicon.png
+│           └── logo.png
+├── translations/
+│   └── ar.csv               # Arabic translations
+├── utils/
+│   └── install.py           # Installation utilities
+└── www/                     # Web pages
+```
+
+**Step 8: Git branching strategy**
+```bash
+# Initial push to dev branch
+git add .
+git commit -m "feat: initial project setup"
+git branch -M dev
+git remote add upstream <your-repo-url>
+git push upstream dev
+
+# Create staging branch
+git checkout -b staging
+git push upstream staging
+```
+
+Branch workflow: `dev → staging → main`
+- `dev`: active development
+- `staging`: QA/UAT testing
+- `main`: production-ready code
+
+Use `upstream` (not `origin`) to point to the central shared repository — `origin` is typically your personal fork.
+
+---
+
+### DocType Namespacing in Frappe
+
+Frappe deliberately avoids traditional namespacing (like `hr.Employee`) in favor of short, clear names (`Employee`). This is a conscious design choice prioritizing simplicity.
+
+**Why no traditional namespacing?**
+```python
+# Frappe's approach (simple)
+frappe.get_doc("Employee", "EMP-001")
+frappe.get_doc("Department", self.department)
+
+# Traditional namespacing (more complex)
+frappe.get_doc("hr.Employee", "EMP-001")
+frappe.get_doc("hr.Department", self.department)
+```
+
+**How Frappe prevents conflicts without namespacing:**
+
+1. **App Isolation** — each app is a separate entity with its own file structure:
+```
+apps/
+  hr/hr/doctype/employee/employee.json    # module: "HR"
+  payroll/payroll/doctype/employee/...    # module: "Payroll"
+```
+
+2. **Database-level uniqueness** — each DocType gets its own table:
+```sql
+CREATE TABLE `tabEmployee` (...);          -- From HR App
+CREATE TABLE `tabPayrollEmployee` (...);   -- From Payroll App
+```
+
+3. **Site-level App Registry** — only installed apps can register DocTypes:
+```python
+# site_config.json
+{"installed_apps": ["frappe", "erpnext", "hr"]}
+```
+
+**Critical rules:**
+- You **cannot** have two DocTypes with the same name in two different apps installed on the **same site** — they'd both try to create `tabEmployee` and conflict
+- You **can** have the same DocType name across different apps if they're installed on **different sites** — each site has its own isolated database
+- Same rule applies to **module names** — module names must be unique per site
+
+```python
+# Runtime resolution: when you call frappe.get_doc("Employee", "EMP-001")
+# Frappe:
+# 1. Checks DocType cache (includes app metadata)
+# 2. Verifies DocType exists in installed apps
+# 3. Loads schema from DocType JSON
+# 4. Queries tabEmployee
+```
+
+**Best practice for naming custom DocTypes:**
+```python
+# Prefix with app/domain context to avoid future conflicts
+"HR Employee"        # Instead of just "Employee"
+"Custom Task"        # Instead of just "Task"
+"Project Customer"   # Instead of just "Customer"
+```
+
+**Multi-site architecture:**
+```
+site1.local → installed: [frappe, hr]      → has tabEmployee (HR schema)
+site2.local → installed: [frappe, payroll] → has tabEmployee (Payroll schema)
+# No conflict — completely isolated databases
+```

@@ -467,3 +467,294 @@ def verify_webhook(payload, signature, secret):
     ).hexdigest()
     return hmac.compare_digest(expected, signature)
 ```
+
+
+---
+
+## Addendum: Source Article Insights
+
+### Production Setup Overview
+
+Frappe production mode uses three key components:
+- **Nginx** — reverse proxy, serves static files
+- **Supervisor** — manages Gunicorn, Socket.IO, and worker processes
+- **Redis** — caching and job queuing
+
+```bash
+# Full production setup sequence (run as frappe user, not root)
+
+# 1. Setup production (configures Nginx, Supervisor, log rotation)
+sudo bench setup production [frappe-user]
+
+# 2. Generate Nginx config
+bench setup nginx
+
+# 3. Setup remaining services
+bench setup supervisor
+bench setup socketio
+bench setup redis
+
+# 4. Apply and restart
+sudo supervisorctl reread
+sudo supervisorctl update
+sudo supervisorctl restart all
+
+# 5. Fix web server permissions
+sudo usermod -aG [frappe-user] www-data
+sudo systemctl restart nginx
+
+# Verify all processes are running
+sudo supervisorctl status
+```
+
+---
+
+### Domain and SSL Configuration
+
+```bash
+# Associate domain with site
+bench setup add-domain --site mysite.localhost example.com
+
+# Install Certbot
+sudo snap install --classic certbot
+sudo ln -sf /snap/bin/certbot /usr/bin/certbot
+
+# Enable DNS multitenancy (required for custom domains)
+bench config dns_multitenant on
+
+# Regenerate Nginx config
+bench setup nginx
+sudo service nginx restart
+
+# Get SSL certificate (interactive)
+sudo certbot --nginx
+
+# Test auto-renewal
+sudo certbot renew --dry-run
+
+# Regenerate Nginx after cert
+bench setup nginx
+sudo service nginx restart
+```
+
+**site_config.json with SSL paths:**
+
+```json
+{
+  "domains": [
+    {
+      "domain": "example.com",
+      "ssl_certificate": "/etc/letsencrypt/live/example.com/fullchain.pem",
+      "ssl_certificate_key": "/etc/letsencrypt/live/example.com/privkey.pem"
+    }
+  ]
+}
+```
+
+---
+
+### Exposing Local Dev with ngrok
+
+ngrok tunnels external traffic to your local Frappe instance — essential for testing webhooks and payment gateway callbacks.
+
+```bash
+cd frappe-bench/
+bench pip install pyngrok
+
+# Store authtoken (get from https://dashboard.ngrok.com/authtokens)
+bench --site mysite set-config ngrok_authtoken YOUR_TOKEN
+bench --site mysite set-config http_port 8000
+
+# Start bench first
+bench start
+
+# In another terminal, start the tunnel
+bench --site mysite ngrok --bind-tls
+# → Public URL: https://abc123.ngrok.io
+```
+
+**Manual ngrok (alternative):**
+
+```bash
+ngrok authtoken YOUR_TOKEN  # one-time setup
+ngrok http 8000
+```
+
+**Free plan limitations:** Random subdomain each restart, bandwidth limits. For stable URLs, use Cloudflare Tunnel (free, no limits).
+
+---
+
+### Docker Deployment
+
+**Building a custom image with your app:**
+
+```bash
+# 1. Create apps.json listing all apps to include
+cat > apps.json << 'EOF'
+[
+  {"url": "https://github.com/frappe/erpnext", "branch": "version-15"},
+  {"url": "https://github.com/myorg/my-custom-app", "branch": "main"}
+]
+EOF
+
+# 2. Encode to base64
+export APPS_JSON_BASE64=$(base64 -w 0 apps.json)
+
+# 3. Clone frappe_docker
+git clone https://github.com/frappe/frappe_docker
+cd frappe_docker
+
+# 4. Build image
+docker build \
+  --no-cache \
+  --progress=plain \
+  --build-arg FRAPPE_BRANCH=version-15 \
+  --build-arg APPS_JSON_BASE64=$APPS_JSON_BASE64 \
+  --file images/layered/Containerfile \
+  --tag myorg/my-frappe-app:latest \
+  .
+
+# 5. Push to Docker Hub
+docker login -u myorg  # use Personal Access Token as password
+docker push myorg/my-frappe-app:latest
+```
+
+**Running with Docker Compose:**
+
+```yaml
+# compose.yaml — minimal production setup
+services:
+  configurator:
+    image: myorg/my-frappe-app:latest
+    restart: on-failure
+    entrypoint: ["bash", "-c"]
+    command: >
+      bench set-config -g db_host $DB_HOST;
+      bench set-config -g redis_cache "redis://$REDIS_CACHE";
+      bench set-config -g redis_queue "redis://$REDIS_QUEUE";
+    environment:
+      DB_HOST: db
+      REDIS_CACHE: redis-cache:6379
+      REDIS_QUEUE: redis-queue:6379
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+    depends_on:
+      db:
+        condition: service_healthy
+
+  backend:
+    image: myorg/my-frappe-app:latest
+    restart: unless-stopped
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+    depends_on:
+      configurator:
+        condition: service_completed_successfully
+
+  frontend:
+    image: myorg/my-frappe-app:latest
+    command: nginx-entrypoint.sh
+    environment:
+      BACKEND: backend:8000
+      SOCKETIO: websocket:9000
+      FRAPPE_SITE_NAME_HEADER: $host
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend
+
+  websocket:
+    image: myorg/my-frappe-app:latest
+    command: node /home/frappe/frappe-bench/apps/frappe/socketio.js
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+
+  queue-short:
+    image: myorg/my-frappe-app:latest
+    command: bench worker --queue short,default
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+
+  scheduler:
+    image: myorg/my-frappe-app:latest
+    command: bench schedule
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+
+  db:
+    image: mariadb:10.6
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-admin}
+    healthcheck:
+      test: mysqladmin ping -h localhost --password=${DB_PASSWORD:-admin}
+      interval: 1s
+      retries: 20
+    volumes:
+      - db-data:/var/lib/mysql
+
+  redis-cache:
+    image: redis:6.2-alpine
+
+  redis-queue:
+    image: redis:6.2-alpine
+
+volumes:
+  sites:
+  db-data:
+```
+
+```bash
+# Start everything
+docker compose up -d
+
+# Monitor site creation
+docker logs frappe_container-create-site-1 -f
+
+# Check all services
+docker compose ps
+```
+
+---
+
+### Dev Container Setup for Local Development
+
+Dev Containers give every developer an identical environment without installing anything locally.
+
+```bash
+# One-time setup
+git clone https://github.com/frappe/frappe_docker.git
+cd frappe_docker
+cp -R devcontainer-example .devcontainer
+cp -R development/vscode-example development/.vscode
+code .
+# Ctrl+Shift+P → "Dev Containers: Reopen in Container"
+```
+
+**Inside the container:**
+
+```bash
+bench init --skip-redis-config-generation frappe-bench
+cd frappe-bench
+
+bench set-config -g db_host mariadb
+bench set-config -g redis_cache redis://redis-cache:6379
+bench set-config -g redis_queue redis://redis-queue:6379
+bench set-config -g redis_socketio redis://redis-queue:6379
+
+bench new-site \
+  --db-root-password 123 \
+  --admin-password admin \
+  --mariadb-user-host-login-scope=% \
+  development.localhost
+
+bench start
+# Access at http://development.localhost:8000
+```
+
+**Daily workflow:**
+1. Open VS Code → navigate to `frappe_docker`
+2. `Ctrl+Shift+P` → "Dev Containers: Reopen in Container"
+3. Open terminal → `bench start`
+4. To stop: `Ctrl+Shift+P` → "Dev Containers: Reopen Folder Locally"

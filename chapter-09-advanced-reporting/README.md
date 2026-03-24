@@ -1690,3 +1690,659 @@ Mastering advanced reporting is essential for data-driven decisions:
 ---
 
 **Next Chapter**: Custom print formats and template design.
+
+
+---
+
+## 📌 Addendum: How to Create Custom Reports in Frappe
+
+### Report Types Overview
+
+| Type | Language | Flexibility | Use Case |
+|------|----------|-------------|---------|
+| **Script Report** | Python | High | Complex logic, dynamic columns, aggregations |
+| **Query Report** | SQL | Moderate | Simple data extraction |
+| **Report Builder** | Visual/GUI | Low | No-code, user-friendly |
+
+### File Structure
+
+```
+apps/your_app/your_app/your_module/report/your_report_name/
+├── __init__.py
+├── your_report_name.json    # Report configuration
+├── your_report_name.py      # Python logic (Script Reports only)
+└── your_report_name.js      # Frontend filters (optional)
+```
+
+### Script Report: Step-by-Step
+
+**Step 1: Create via UI**
+1. Enable Developer Mode
+2. Go to Report List → New Report
+3. Set Report Type = "Script Report", Is Standard = Yes
+4. Save — Frappe creates the folder with boilerplate files
+
+**Step 2: Python Logic (`report_name.py`)**
+
+```python
+import frappe
+from frappe import _
+
+def execute(filters=None):
+    filters = frappe._dict(filters or {})
+    columns = get_columns(filters)
+    data = get_data(filters)
+    return columns, data
+
+def get_columns(filters):
+    return [
+        {
+            "label": _("ID"),
+            "fieldtype": "Link",
+            "fieldname": "name",
+            "options": "Your DocType",
+            "width": 120,
+        },
+        {
+            "label": _("Status"),
+            "fieldtype": "Data",
+            "fieldname": "status",
+            "width": 100,
+        },
+        {
+            "label": _("Amount"),
+            "fieldtype": "Currency",
+            "fieldname": "amount",
+            "width": 120,
+        }
+    ]
+
+def get_data(filters):
+    conditions = []
+    values = {}
+
+    if filters.get("organization"):
+        conditions.append("organization = %(organization)s")
+        values["organization"] = filters.organization
+
+    where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+
+    return frappe.db.sql(f"""
+        SELECT name, status, amount
+        FROM `tabYour DocType`
+        {where_clause}
+        ORDER BY creation DESC
+    """, values=values, as_dict=True)
+```
+
+**Step 3: JavaScript Filters (`report_name.js`)**
+
+```javascript
+frappe.query_reports["My Custom Report"] = {
+    "filters": [
+        {
+            fieldname: "organization",
+            label: __("Organization"),
+            fieldtype: "Link",
+            options: "Organization",
+            reqd: 1,
+        },
+        {
+            fieldname: "from_date",
+            label: __("From Date"),
+            fieldtype: "Date",
+            default: frappe.datetime.year_start(),
+            reqd: 1,
+        },
+        {
+            fieldname: "to_date",
+            label: __("To Date"),
+            fieldtype: "Date",
+            default: frappe.datetime.year_end(),
+            reqd: 1,
+        }
+    ]
+};
+```
+
+### Query Report: Step-by-Step
+
+Select "Query Report" as Report Type, then enter SQL in the "Query" field:
+
+```sql
+SELECT
+  name AS "Name:Link/Item:200",
+  stock_uom AS "UOM:Data:100",
+  ifnull(sum(bin.actual_qty), 0) AS "Stock:Float:100"
+FROM `tabItem`
+LEFT JOIN `tabBin` bin ON bin.item_code = `tabItem`.name
+GROUP BY `tabItem`.name, `tabItem`.stock_uom;
+```
+
+Use `%(filter_name)s` syntax to inject filter values in SQL.
+
+### Advanced Features
+
+**Dynamic Columns:**
+
+```python
+def get_columns(filters, project_types):
+    columns = [{"label": _("Product"), "fieldtype": "Data", "fieldname": "product"}]
+    for project_type in project_types:
+        columns.append({
+            "label": _(project_type["title"]),
+            "fieldtype": "Int",
+            "fieldname": project_type["id"],
+        })
+    return columns
+```
+
+**Conditional Filter Logic:**
+
+```javascript
+{
+    fieldname: "time_window",
+    label: __("Time Window"),
+    fieldtype: "Select",
+    options: ['Annual', 'Quarterly', 'Monthly'],
+    on_change: function(report) {
+        const value = this.get_value();
+        if (value == "Annual") {
+            report.set_filter_value('from_date', frappe.datetime.year_start());
+            report.set_filter_value('to_date', frappe.datetime.year_end());
+        }
+        report.refresh();
+    }
+}
+```
+
+### Custom Print Format for Script Report
+
+Create `your_report_name.html` in the same directory:
+
+```html
+<h2>{{ report.report_name }}</h2>
+<table class="table table-bordered">
+  <thead>
+    <tr>
+      {% for col in columns %}
+        <th>{{ col.label }}</th>
+      {% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in data %}
+      <tr>
+        {% for col in columns %}
+          <td>{{ row[col.fieldname] }}</td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+```
+
+> Note: Frappe uses John Resig's MicroTemplate engine (not Jinja2) for Script Report HTML files. Use Jinja only for server-side contexts like Print Formats, Email Templates, and Web Pages.
+
+### Column Format Specifications
+
+```python
+# Dictionary format (recommended)
+{"label": _("Amount"), "fieldtype": "Currency", "fieldname": "amount", "width": 120}
+
+# String shorthand format
+"Amount:Currency:120"
+"ID:Link/DocType:90"
+```
+
+### Best Practices
+
+- Use parameterized queries to prevent SQL injection
+- Add WHERE clauses to limit data
+- Use indexes on filtered columns
+- Set appropriate role permissions in the JSON config
+- Provide sensible default filter values
+
+
+---
+
+## Addendum: Practical Reporting Patterns from the Field
+
+### Report Types at a Glance
+
+| Type | Language | Use Case | Files |
+|------|----------|----------|-------|
+| Script Report | Python | Complex logic, calculations, dynamic columns | `.py`, `.js`, `.json` |
+| Query Report | SQL | Straightforward data extraction | `.json`, `.js` |
+| Report Builder | GUI | Simple reports, no code | `.json` |
+
+### File Structure
+
+Every report lives in a predictable location:
+```
+apps/your_app/your_app/your_module/report/your_report_name/
+├── __init__.py
+├── your_report_name.json    # metadata (auto-generated)
+├── your_report_name.py      # Python logic (Script Reports)
+├── your_report_name.js      # filters (optional)
+└── your_report_name.html    # custom print format (optional)
+```
+
+### Script Report — Minimal Working Example
+
+```python
+# your_report.py
+import frappe
+from frappe import _
+
+def execute(filters=None):
+    filters = frappe._dict(filters or {})
+    return get_columns(), get_data(filters)
+
+def get_columns():
+    return [
+        {"label": _("Order"), "fieldtype": "Link", "fieldname": "name",
+         "options": "Sales Order", "width": 150},
+        {"label": _("Customer"), "fieldtype": "Link", "fieldname": "customer",
+         "options": "Customer", "width": 200},
+        {"label": _("Date"), "fieldtype": "Date", "fieldname": "posting_date", "width": 100},
+        {"label": _("Total"), "fieldtype": "Currency", "fieldname": "grand_total", "width": 120},
+    ]
+
+def get_data(filters):
+    conditions = build_conditions(filters)
+    return frappe.db.sql(f"""
+        SELECT name, customer, posting_date, grand_total
+        FROM `tabSales Order`
+        WHERE docstatus = 1 {conditions}
+        ORDER BY posting_date DESC
+        LIMIT 10000
+    """, filters, as_dict=True)
+
+def build_conditions(filters):
+    conditions = []
+    if filters.get("from_date"):
+        conditions.append("AND posting_date >= %(from_date)s")
+    if filters.get("to_date"):
+        conditions.append("AND posting_date <= %(to_date)s")
+    if filters.get("customer"):
+        conditions.append("AND customer = %(customer)s")
+    return " ".join(conditions)
+```
+
+```javascript
+// your_report.js
+frappe.query_reports["Your Report"] = {
+    filters: [
+        {
+            fieldname: "from_date",
+            label: __("From Date"),
+            fieldtype: "Date",
+            default: frappe.datetime.month_start(),
+            reqd: 1
+        },
+        {
+            fieldname: "to_date",
+            label: __("To Date"),
+            fieldtype: "Date",
+            default: frappe.datetime.month_end(),
+            reqd: 1
+        },
+        {
+            fieldname: "customer",
+            label: __("Customer"),
+            fieldtype: "Link",
+            options: "Customer"
+        }
+    ]
+};
+```
+
+### Query Report — SQL-Based
+
+```javascript
+// report.json — set report_type to "Query Report" and add the query field
+// report.js — same filter syntax as Script Reports
+frappe.query_reports["Stock Summary"] = {
+    filters: [
+        { fieldname: "item_code", label: __("Item"), fieldtype: "Link", options: "Item" }
+    ]
+};
+```
+
+```sql
+-- The query goes in the "query" field of the JSON config
+SELECT
+    i.name AS "Item:Link/Item:200",
+    i.stock_uom AS "UOM:Data:80",
+    IFNULL(SUM(b.actual_qty), 0) AS "Stock:Float:100"
+FROM `tabItem` i
+LEFT JOIN `tabBin` b ON b.item_code = i.name
+WHERE i.disabled = 0
+    {% if filters.item_code %}
+    AND i.name = %(item_code)s
+    {% endif %}
+GROUP BY i.name, i.stock_uom
+ORDER BY i.name
+```
+
+### Dynamic Columns
+
+```python
+def execute(filters=None):
+    filters = frappe._dict(filters or {})
+
+    # Fetch the dynamic dimension (e.g., project types)
+    project_types = frappe.get_all("Project Type", fields=["name as id", "title"])
+
+    columns = get_columns(project_types)
+    data = get_data(filters, project_types)
+    return columns, data
+
+def get_columns(project_types):
+    cols = [
+        {"label": _("Product"), "fieldtype": "Data", "fieldname": "product", "width": 200}
+    ]
+    for pt in project_types:
+        cols.append({
+            "label": _(pt.title),
+            "fieldtype": "Int",
+            "fieldname": pt.id,
+            "width": 100
+        })
+    cols.append({"label": _("Total"), "fieldtype": "Int", "fieldname": "total", "width": 100})
+    return cols
+
+def get_data(filters, project_types):
+    # Build a CASE-based pivot query
+    case_clauses = "\n".join([
+        f"SUM(CASE WHEN project_type = %(val_{i})s THEN amount ELSE 0 END) AS `{pt.id}`"
+        for i, pt in enumerate(project_types)
+    ])
+
+    for i, pt in enumerate(project_types):
+        filters[f"val_{i}"] = pt.id
+
+    return frappe.db.sql(f"""
+        SELECT
+            product_name AS product,
+            {case_clauses},
+            SUM(amount) AS total
+        FROM `tabProject Revenue`
+        WHERE posting_date BETWEEN %(from_date)s AND %(to_date)s
+        GROUP BY product_name
+        ORDER BY total DESC
+    """, filters, as_dict=True)
+```
+
+### Advanced Filter Patterns
+
+```javascript
+// Filter with dependency
+{
+    fieldname: "warehouse",
+    label: __("Warehouse"),
+    fieldtype: "Link",
+    options: "Warehouse",
+    get_query() {
+        return {
+            filters: { company: frappe.query_report.get_filter_value("company") }
+        };
+    }
+},
+
+// Auto-update date range on select
+{
+    fieldname: "period",
+    label: __("Period"),
+    fieldtype: "Select",
+    options: ["Monthly", "Quarterly", "Annual"],
+    on_change(report) {
+        const v = this.get_value();
+        if (v === "Annual") {
+            report.set_filter_value("from_date", frappe.datetime.year_start());
+            report.set_filter_value("to_date", frappe.datetime.year_end());
+        } else if (v === "Monthly") {
+            report.set_filter_value("from_date", frappe.datetime.month_start());
+            report.set_filter_value("to_date", frappe.datetime.month_end());
+        }
+        report.refresh();
+    }
+},
+
+// Multi-select
+{
+    fieldname: "item_codes",
+    label: __("Items"),
+    fieldtype: "MultiSelectList",
+    options: "Item",
+    get_data(txt) {
+        return frappe.db.get_link_options("Item", txt);
+    }
+}
+```
+
+### Performance Optimization
+
+The single biggest cause of slow or crashing reports is loading too much data into Python memory. Fix it at the query level.
+
+**The N+1 problem — and how to fix it:**
+
+```python
+# BAD: 10,000 orders = 10,001 queries
+for order in orders:
+    customer_name = frappe.db.get_value("Customer", order.customer, "customer_name")
+
+# GOOD: single JOIN query
+data = frappe.db.sql("""
+    SELECT
+        so.name,
+        c.customer_name,
+        so.grand_total
+    FROM `tabSales Order` so
+    INNER JOIN `tabCustomer` c ON so.customer = c.name
+    WHERE so.posting_date BETWEEN %(from_date)s AND %(to_date)s
+    LIMIT 10000
+""", filters, as_dict=True)
+```
+
+**Push aggregation to the database:**
+
+```python
+# BAD: load all rows, aggregate in Python
+items = frappe.db.sql("SELECT * FROM `tabSales Order Item`", as_dict=True)
+totals = {}
+for item in items:
+    totals[item.item_code] = totals.get(item.item_code, 0) + item.amount
+
+# GOOD: let the database aggregate
+data = frappe.db.sql("""
+    SELECT
+        soi.item_code,
+        i.item_name,
+        SUM(soi.qty) AS total_qty,
+        SUM(soi.amount) AS total_amount
+    FROM `tabSales Order Item` soi
+    INNER JOIN `tabItem` i ON soi.item_code = i.name
+    INNER JOIN `tabSales Order` so ON soi.parent = so.name
+    WHERE so.posting_date BETWEEN %(from_date)s AND %(to_date)s
+        AND so.docstatus = 1
+    GROUP BY soi.item_code
+    ORDER BY total_amount DESC
+    LIMIT 1000
+""", filters, as_dict=True)
+```
+
+**Use generators for very large datasets:**
+
+```python
+def get_data(filters):
+    data = []
+    with frappe.db.unbuffered_cursor():
+        rows = frappe.db.sql("""
+            SELECT name, customer, grand_total
+            FROM `tabSales Order`
+            WHERE posting_date BETWEEN %(from_date)s AND %(to_date)s
+        """, filters, as_iterator=True)
+
+        for (name, customer, total) in rows:
+            data.append({"name": name, "customer": customer, "grand_total": total})
+            if len(data) >= 10000:
+                break
+    return data
+```
+
+**Cache expensive calculations:**
+
+```python
+def get_data(filters):
+    orders = frappe.get_all("Sales Order",
+        filters={"posting_date": ["between", [filters.from_date, filters.to_date]]},
+        fields=["name", "customer"])
+
+    # Pre-fetch all customer LTVs in one query
+    ltv_map = {
+        row.customer: row.ltv
+        for row in frappe.db.sql("""
+            SELECT customer, SUM(grand_total) AS ltv
+            FROM `tabSales Order`
+            WHERE docstatus = 1
+            GROUP BY customer
+        """, as_dict=True)
+    }
+
+    return [
+        {"name": o.name, "customer": o.customer, "ltv": ltv_map.get(o.customer, 0)}
+        for o in orders
+    ]
+```
+
+### Prepared Reports — For Heavy Operations
+
+If a report takes more than 15 seconds, Frappe automatically suggests enabling Prepared Reports. They run in the background queue and store compressed results.
+
+**How it works:**
+```
+User clicks "Generate" → Background job created → Report runs (up to 25 min)
+→ Results compressed (gzip) → Saved as attachment → User notified via realtime
+```
+
+**Enable it:**
+1. Open the Report DocType record
+2. Check "Enable Prepared Report"
+3. Set Timeout (default: 25 minutes)
+4. No code changes needed — same `execute()` function runs in background
+
+**Frappe's automatic trigger (from source):**
+```python
+# If report takes > 15 seconds, Frappe auto-enables prepared report mode
+threshold = 15  # seconds
+prepared_report_watcher = threading.Timer(
+    interval=threshold,
+    function=enable_prepared_report,
+    kwargs={"report": self.name, "site": frappe.local.site}
+)
+```
+
+**Frontend limit:** The browser refuses to render more than 100,000 rows (configurable via `sysdefaults.max_report_rows`). For larger datasets, use Prepared Reports and export.
+
+### Adding Indexes for Report Performance
+
+```python
+# In a patch or migration
+def execute():
+    # Add composite index for common report filter pattern
+    if not frappe.db.has_index("Sales Order", "idx_so_date_status"):
+        frappe.db.sql("""
+            ALTER TABLE `tabSales Order`
+            ADD INDEX idx_so_date_status (posting_date, docstatus, company)
+        """)
+```
+
+**Use EXPLAIN to verify:**
+```python
+result = frappe.db.sql("""
+    EXPLAIN SELECT name, customer, grand_total
+    FROM `tabSales Order`
+    WHERE posting_date BETWEEN '2024-01-01' AND '2024-12-31'
+    AND docstatus = 1
+""", as_dict=True)
+
+# Look for: type = "range" or "ref" (good), not "ALL" (bad)
+for row in result:
+    print(f"Table: {row.table}, Type: {row.type}, Rows scanned: {row.rows}")
+```
+
+### Custom Print Format for Script Reports
+
+Create a `.html` file matching the report name in the same directory:
+
+```html
+<!-- your_report.html — uses John Resig's MicroTemplate, NOT Jinja2 -->
+<h2>{{ report.report_name }}</h2>
+<p>Generated: {{ frappe.datetime.now_datetime() }}</p>
+
+<table class="table table-bordered table-condensed">
+    <thead>
+        <tr>
+            {% for col in columns %}
+            <th>{{ col.label }}</th>
+            {% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in data %}
+        <tr>
+            {% for col in columns %}
+            <td>{{ row[col.fieldname] || "" }}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+```
+
+> Note: Frappe uses MicroTemplate (`{% %}`) for client-side report HTML, not Jinja2. Jinja2 is only for server-side templates (Print Formats, Email Templates, Web Pages).
+
+Access via: Report → top-right menu (⋮) → Print.
+
+### Column Format Reference
+
+```python
+# Dictionary format (recommended)
+{"label": _("Amount"), "fieldtype": "Currency", "fieldname": "amount", "width": 120}
+{"label": _("Item"), "fieldtype": "Link", "fieldname": "item_code", "options": "Item", "width": 150}
+{"label": _("Date"), "fieldtype": "Date", "fieldname": "posting_date", "width": 100}
+{"label": _("Status"), "fieldtype": "Data", "fieldname": "status", "width": 80}
+
+# Shorthand string format
+"Amount:Currency:120"
+"Item:Link/Item:150"
+"Date:Date:100"
+```
+
+### Pagination for Large Reports
+
+```python
+def execute(filters=None):
+    filters = frappe._dict(filters or {})
+    page = int(filters.get("page", 1))
+    page_size = int(filters.get("page_size", 500))
+    offset = (page - 1) * page_size
+
+    total = frappe.db.sql("""
+        SELECT COUNT(*) FROM `tabSales Order`
+        WHERE posting_date BETWEEN %(from_date)s AND %(to_date)s
+    """, filters)[0][0]
+
+    data = frappe.db.sql("""
+        SELECT name, customer, posting_date, grand_total
+        FROM `tabSales Order`
+        WHERE posting_date BETWEEN %(from_date)s AND %(to_date)s
+        ORDER BY posting_date DESC
+        LIMIT %(page_size)s OFFSET %(offset)s
+    """, {**filters, "page_size": page_size, "offset": offset}, as_dict=True)
+
+    message = f"Showing {offset + 1}–{offset + len(data)} of {total} records"
+    return get_columns(), data, message
+```

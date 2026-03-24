@@ -266,3 +266,224 @@ No. Manifest = index pointing to files (`assets.json`). Bundle = the actual comp
 
 **Q: How do I debug bundled code?**
 Frappe generates source maps automatically. Open browser dev tools and you'll see your original source files, not the bundled version.
+
+
+---
+
+## Addendum: Source Article Insights
+
+### What is Asset Bundling in Frappe?
+
+Frappe uses **esbuild** to bundle JavaScript and CSS files. Bundling combines multiple source files into a single optimized output file, reducing HTTP requests and enabling modern JavaScript features like ES6 `import`/`export`.
+
+**The problem bundling solves:**
+
+```html
+<!-- Old way: 6 separate HTTP requests, manual ordering required -->
+<script src="jquery.js"></script>
+<script src="bootstrap.js"></script>
+<script src="utils.js"></script>
+<script src="controllers.js"></script>
+<script src="models.js"></script>
+<script src="app.js"></script>
+
+<!-- With bundling: 1 request, automatic dependency resolution -->
+<script src="/assets/myapp/js/myapp.bundle.ABC123.js"></script>
+```
+
+---
+
+### The .bundle.js Entry Point Pattern
+
+A `.bundle.js` file is **not** the final output — it's an **entry point** (a list of imports) that tells esbuild what to include. Think of it as a shopping list.
+
+```javascript
+// your_app/public/js/your_app.bundle.js
+// This file is the entry point — it just imports other files
+
+import "./form_guard";
+import "./utils/helpers";
+import "./utils/validation";
+import "./controllers/asset_controller";
+import "./controllers/purchase_controller";
+
+// Import from node_modules
+import "moment";
+
+// Import HTML templates (converted to frappe.templates["name"])
+import "./templates/notification.html";
+```
+
+```javascript
+// your_app/public/js/utils/helpers.js — your actual code
+export function formatCurrency(amount, currency = "USD") {
+    return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency
+    }).format(amount);
+}
+
+export function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func(...args), wait);
+    };
+}
+```
+
+**Register the bundle in hooks.py:**
+
+```python
+# hooks.py
+app_include_js = ["your_app.bundle.js"]
+app_include_css = ["your_app.bundle.css"]
+```
+
+**Build the assets:**
+
+```bash
+bench build --app your_app
+bench clear-cache
+```
+
+---
+
+### How the Build Pipeline Works
+
+```
+your_app.bundle.js (entry point)
+    ↓ esbuild reads and follows all imports
+    ↓ Combines all imported files
+    ↓ Creates your_app.bundle.ABC123.js (hash in filename)
+    ↓ Updates assets.json: {"your_app.bundle.js": "/assets/your_app/js/your_app.bundle.ABC123.js"}
+    ↓ At runtime, Frappe reads assets.json to find the real file path
+    ↓ Injects <script src="/assets/your_app/js/your_app.bundle.ABC123.js"> into HTML
+```
+
+**The `assets.json` manifest file** maps logical bundle names to their hashed output paths. This ensures browsers always load the latest version after a build.
+
+```json
+{
+  "your_app.bundle.js": "/assets/your_app/dist/js/your_app.bundle.ABC123.js",
+  "your_app.bundle.css": "/assets/your_app/dist/css/your_app.bundle.DEF456.css"
+}
+```
+
+---
+
+### Development vs Production Mode
+
+**Development mode:** Frappe serves your original source `.js` files directly. Edit a `.js` file, refresh the browser — changes appear immediately. No rebuild needed.
+
+**Production mode:** Frappe serves the actual bundled (minified) file. You must run `bench build` after any change for it to take effect.
+
+```
+Edit utils/helpers.js
+    ↓
+Development: Browser gets updated source file immediately ✓
+Production:  Browser still gets old bundle — run bench build first ✗
+```
+
+**Rule of thumb:**
+- Edit `.js` source files → just refresh (dev mode)
+- Edit `.bundle.js` entry point (add/remove imports) → must `bench build`
+
+---
+
+### Multiple Bundles and Code Splitting
+
+```python
+# hooks.py — split into logical bundles
+app_include_js = [
+    "core.bundle.js",      # Core functionality (changes rarely)
+    "ui.bundle.js",        # UI components
+    "reports.bundle.js"    # Reporting features
+]
+```
+
+**Benefits:** Better browser caching (core bundle cached longer), parallel loading, smaller individual files.
+
+---
+
+### CSS Bundling
+
+```scss
+/* your_app/public/css/your_app.bundle.scss */
+@import "./variables";
+@import "./forms";
+@import "./listview";
+@import "./print";
+```
+
+```python
+# hooks.py
+app_include_css = ["your_app.bundle.css"]
+```
+
+Frappe uses PostCSS to process CSS — it automatically adds browser vendor prefixes, minifies in production, and supports modern CSS features.
+
+---
+
+### Using npm Packages in Bundles
+
+```bash
+# Install a package in your app directory
+cd apps/your_app
+yarn add lodash-es date-fns
+```
+
+```javascript
+// your_app.bundle.js
+import { debounce, groupBy } from "lodash-es";
+import { format, addDays } from "date-fns";
+
+// Use in your code
+const debouncedSearch = debounce(search, 300);
+const formatted = format(new Date(), "yyyy-MM-dd");
+```
+
+---
+
+### HTML Template Imports
+
+```javascript
+// your_app.bundle.js
+import "./templates/item_card.html";
+```
+
+```html
+<!-- your_app/public/js/templates/item_card.html -->
+<div class="item-card">
+    <h4>{{ item_name }}</h4>
+    <p>{{ description }}</p>
+</div>
+```
+
+esbuild converts this to:
+
+```javascript
+frappe.templates["item_card"] = '<div class="item-card">...';
+```
+
+Usage in JavaScript:
+
+```javascript
+let html = frappe.render_template("item_card", { item_name: "Widget", description: "A widget" });
+$(container).html(html);
+```
+
+---
+
+### Debugging Bundled Code
+
+Frappe generates **source maps** automatically in development. In browser DevTools, you'll see your original source files (not the bundle), making debugging straightforward.
+
+```bash
+# Force a clean rebuild
+bench build --app your_app --force
+bench clear-cache
+
+# Build all apps
+bench build
+```

@@ -1001,3 +1001,207 @@ for row_data in new_rows:
     doc.append('items', row_data)
 doc.save()
 ```
+
+
+---
+
+## Addendum: Source Article Insights
+
+### DocType: The Complete Story
+
+A DocType is more than a database table — it's a metadata-driven definition that tells Frappe how to handle a specific type of document. The name comes from "Document Type": just as you have different types of documents in real life (invoices, contracts, reports), Frappe has different types of documents (Sales Orders, Customers, Users).
+
+**The meta-system:** DocType definitions are themselves stored as DocType records. When you add a field to Customer via the UI, Frappe inserts a row into `tabDocField`. When you create a new DocType, Frappe creates a record in `tabDocType`. The system manages its own schema as data.
+
+```sql
+-- DocType definition stored as data
+INSERT INTO tabDocType (name, module, custom, ...) VALUES ('Customer', 'Selling', 0, ...);
+
+-- Field definitions stored as data
+INSERT INTO tabDocField (parent, fieldname, fieldtype, label, ...)
+VALUES ('Customer', 'customer_name', 'Data', 'Customer Name', ...);
+```
+
+**Schema sync:** When you save a DocType, Frappe automatically creates or alters the backing SQL table:
+```sql
+-- Frappe auto-generates this from DocType metadata
+CREATE TABLE `tabCustomer` (
+    `name` varchar(255) NOT NULL,
+    `creation` datetime(6) DEFAULT NULL,
+    `modified` datetime(6) DEFAULT NULL,
+    `modified_by` varchar(255) DEFAULT NULL,
+    `owner` varchar(255) DEFAULT NULL,
+    `docstatus` int(1) NOT NULL DEFAULT '0',
+    `customer_name` varchar(255) DEFAULT NULL,
+    PRIMARY KEY (`name`)
+);
+```
+
+Schema sync happens automatically when you save a DocType in the UI, or via `bench migrate` when pulling code changes.
+
+---
+
+### DocType Types
+
+| Type | Storage | Use Case |
+|------|---------|----------|
+| Document | `tab{DocType}` | Business records (Customer, Sales Order) |
+| Child Table | `tab{DocType}` with parent/parenttype/parentfield | Line items (Sales Order Item) |
+| Single | `tabSingles` key-value store | Global settings (System Settings) |
+| Setup | `tab{DocType}` | System definitions (Role, Module Def) |
+
+```python
+# Single DocType access
+date_format = frappe.db.get_single_value("System Settings", "date_format")
+settings = frappe.get_single("System Settings")
+
+# Standard DocType access
+customer = frappe.get_doc("Customer", "CUST-001")
+
+# Child table access (always through parent)
+order = frappe.get_doc("Sales Order", "SAL-001")
+for item in order.items:
+    print(item.item_code, item.qty)
+```
+
+---
+
+### Child DocType Philosophy
+
+Child DocTypes implement the **Aggregate Pattern** from Domain-Driven Design. They represent **part-of** relationships (not has-a), maintain lifecycle dependency on their parent, and operate as atomic units within the parent's transaction boundary.
+
+**The three mandatory fields in every child record:**
+```python
+parent      = "SAL-001"        # Parent document name
+parenttype  = "Sales Order"    # Parent DocType name
+parentfield = "items"          # Field name in parent
+```
+
+**Database schema:**
+```sql
+CREATE TABLE `tabSales Order Item` (
+    `name` VARCHAR(255) NOT NULL,
+    `parent` VARCHAR(255) DEFAULT NULL,
+    `parenttype` VARCHAR(255) DEFAULT NULL,
+    `parentfield` VARCHAR(255) DEFAULT NULL,
+    `idx` BIGINT NOT NULL DEFAULT 0,
+    `item_code` VARCHAR(255) DEFAULT NULL,
+    `quantity` DECIMAL(21,9) DEFAULT 0,
+    `rate` DECIMAL(21,9) DEFAULT 0,
+    PRIMARY KEY (`name`),
+    INDEX `parent` (`parent`, `parenttype`, `parentfield`),
+    INDEX `idx` (`parent`, `parentfield`, `idx`)
+);
+```
+
+**Working with child tables:**
+```python
+# Add child row
+doc = frappe.get_doc("Sales Order", "SAL-001")
+doc.append("items", {
+    "item_code": "ITEM-001",
+    "quantity": 10,
+    "rate": 100
+})
+doc.save()
+
+# Iterate children
+for item in doc.items:
+    item.amount = item.quantity * item.rate
+doc.save()
+
+# Remove child
+doc.remove(doc.items[0])
+doc.save()
+
+# Query children directly
+items = frappe.get_all("Sales Order Item",
+    filters={"parent": "SAL-001", "parenttype": "Sales Order"},
+    fields=["item_code", "quantity", "rate"]
+)
+```
+
+**Avoid the N+1 problem:**
+```python
+# Bad: N+1 queries
+for item in parent.items:
+    item_details = frappe.get_doc("Item", item.item_code)  # N queries!
+
+# Good: batch query
+item_codes = [item.item_code for item in parent.items]
+items_data = {i.name: i for i in frappe.get_all("Item",
+    filters={"name": ["in", item_codes]},
+    fields=["name", "item_name", "standard_rate"]
+)}
+for item in parent.items:
+    details = items_data.get(item.item_code)
+```
+
+**CDT (Child DocType) vs CDN (Child DocName):**
+- CDT = the DocType name of the child table (e.g., `"Sales Order Item"`)
+- CDN = the unique name of a specific child record (e.g., `"SAL-001-Sales Order Item-1"`)
+
+In client scripts, `cdt` and `cdn` are passed to child table event handlers:
+```javascript
+frappe.ui.form.on('Sales Order Item', {
+    quantity: function(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];  // Access the specific row
+        row.amount = row.quantity * row.rate;
+        frm.refresh_field('items');
+    }
+});
+```
+
+---
+
+### Frappe Field Types Reference
+
+Frappe supports 47 field types. The most important distinction for performance is **in-row storage**:
+
+| Field Type | MySQL Type | In-Row Storage | Notes |
+|------------|-----------|----------------|-------|
+| Data | VARCHAR(140) | 140-142 bytes | Short text, indexed |
+| Link | VARCHAR(140) | 140-142 bytes | Reference to another DocType |
+| Select | VARCHAR(140) | 140-142 bytes | Dropdown options |
+| Text | TEXT | 10 bytes | Medium content, not indexed |
+| Small Text | TEXT | 10 bytes | Short content, not indexed |
+| Long Text | LONGTEXT | 12 bytes | Long content |
+| Int | INT | 4 bytes | Integer |
+| Float | DECIMAL | varies | Decimal number |
+| Currency | DECIMAL | varies | Money values |
+| Date | DATE | 3 bytes | Date only |
+| Datetime | DATETIME | 5+ bytes | Date + time |
+| Check | INT(1) | 1 byte | Boolean 0/1 |
+| Table | — | 0 bytes | Child table reference |
+| Section Break | — | 0 bytes | Layout only |
+| Column Break | — | 0 bytes | Layout only |
+
+**The 65KB row size limit:** MySQL/MariaDB limits each row to 65,535 bytes. TEXT/BLOB fields store data separately and only use a 10-byte pointer in the row. VARCHAR fields store data inline.
+
+```python
+# Check row size utilization
+row_size = frappe.db.get_row_size("Customer")
+print(f"Row size: {row_size} bytes / 65535 bytes")
+
+# Fix: change Data fields to Text where indexing isn't needed
+# Before: description = Data (140 bytes in row)
+# After:  description = Text (10 bytes in row) — saves 130 bytes
+```
+
+**Table trimming** — remove orphan database columns left behind when fields are deleted:
+```bash
+# Preview what will be removed
+bench --site mysite.local trim-tables --dry-run
+
+# Execute (creates backup first)
+bench --site mysite.local trim-tables
+```
+
+```python
+# Python API
+from frappe.model.meta import trim_table, trim_tables
+
+orphans = trim_table("Customer", dry_run=True)   # Preview
+trim_table("Customer", dry_run=False)             # Execute
+trim_tables(dry_run=False)                        # All tables
+```

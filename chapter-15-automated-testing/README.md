@@ -2201,3 +2201,586 @@ The file `chapter-15-automated-testing/tests/test_asset.py` now includes a `Test
 - Asset with no depreciation schedule
 
 These edge cases complement the existing `TestAssetController` and `TestAssetMethods` classes and are designed to run with `FrappeTestCase` so each test is automatically rolled back.
+
+
+---
+
+## 📌 Addendum: Frappe Unit Testing — Fundamentals and Patterns
+
+### Testing Framework Overview
+
+Frappe uses Python's built-in `unittest` framework. Key features:
+- **Automatic database rollback** after each test
+- **Test record management** — automatic creation and cleanup of test data
+- **Permission testing** — built-in utilities for testing user permissions
+- **Cache management** — automatic cache clearing between tests
+- **Parallel execution** support
+
+### Prerequisites
+
+```bash
+# Enable tests for your site
+bench --site [site-name] set-config allow_tests true
+
+# Install dev dependencies
+bench setup requirements --dev
+```
+
+### Directory Structure
+
+```
+your_app/
+├── your_app/
+│   ├── module/
+│   │   ├── doctype/
+│   │   │   └── doctype_name/
+│   │   │       ├── doctype_name.py
+│   │   │       ├── test_doctype_name.py   # DocType tests
+│   │   │       └── test_records.json      # Test data (optional)
+│   │   └── tests/
+│   │       └── test_module.py             # Module-level tests
+│   └── tests/
+│       └── test_app.py                    # App-level tests
+```
+
+### Base Test Classes
+
+#### FrappeTestCase (primary)
+
+```python
+import frappe
+from frappe.tests.utils import FrappeTestCase
+
+class TestMyDocType(FrappeTestCase):
+    def test_something(self):
+        pass
+```
+
+Key: always call `super().setUpClass()` if you override `setUpClass`. Database changes are automatically rolled back after each test.
+
+#### FrappeAPITestCase (for API endpoints)
+
+```python
+from frappe.tests.test_api import FrappeAPITestCase
+
+class TestMyAPI(FrappeAPITestCase):
+    version = "v1"  # or "v2"
+    
+    def test_get_resource(self):
+        response = self.get(self.resource("ToDo", "test-todo"))
+        self.assertEqual(response.status_code, 200)
+    
+    def test_create_resource(self):
+        data = {"doctype": "ToDo", "description": "Test"}
+        response = self.post(self.resource("ToDo"), data)
+        self.assertEqual(response.status_code, 200)
+```
+
+#### MockedRequestTestCase (for external HTTP calls)
+
+```python
+from frappe.tests.utils import MockedRequestTestCase
+import responses
+
+class TestExternalAPI(MockedRequestTestCase):
+    def test_external_call(self):
+        self.responses.add(
+            responses.GET,
+            "https://api.example.com/data",
+            json={"status": "ok"},
+            status=200
+        )
+        result = call_external_api()
+        self.assertEqual(result["status"], "ok")
+```
+
+### Common Test Patterns
+
+#### Document creation
+
+```python
+def test_create_document(self):
+    doc = frappe.get_doc({
+        "doctype": "MyDocType",
+        "field1": "value1"
+    })
+    doc.insert()
+    
+    self.assertIsNotNone(doc.name)
+    self.assertTrue(frappe.db.exists("MyDocType", doc.name))
+```
+
+#### Validation errors
+
+```python
+def test_required_field_validation(self):
+    doc = frappe.get_doc({"doctype": "MyDocType"})  # Missing required field
+    
+    with self.assertRaises(frappe.ValidationError):
+        doc.insert()
+```
+
+#### Permission testing
+
+```python
+def test_permissions(self):
+    doc = frappe.get_doc({"doctype": "MyDocType", "field1": "value1"})
+    doc.insert()
+    
+    with self.set_user("test@example.com"):
+        doc = frappe.get_doc("MyDocType", doc.name)
+        self.assertTrue(doc.has_permission("read"))
+        self.assertFalse(doc.has_permission("write"))
+```
+
+#### Document updates
+
+```python
+def test_update_document(self):
+    doc = frappe.get_doc({"doctype": "MyDocType", "field1": "old_value"})
+    doc.insert()
+    
+    doc.field1 = "new_value"
+    doc.save()
+    
+    doc.reload()
+    self.assertEqual(doc.field1, "new_value")
+```
+
+### Test File Naming Rules
+
+1. Test files **must** start with `test_`
+2. For DocType tests: match the DocType name (`test_item.py` for `Item`)
+3. Test methods **must** start with `test_`
+4. Use descriptive names: `test_create_document`, `test_validate_required_fields`
+
+### Test Discovery
+
+Frappe automatically discovers:
+- Files starting with `test_`
+- Classes inheriting from `unittest.TestCase` or `FrappeTestCase`
+- Methods starting with `test_`
+
+Excluded directories: `locals/`, `.git/`, `public/`, `__pycache__/`, `doctype/doctype/boilerplate/`
+
+### Running Tests
+
+```bash
+# Run all tests for an app
+bench run-tests --app your_app
+
+# Run tests for a specific DocType
+bench run-tests --doctype "My DocType"
+
+# Run a specific test
+bench run-tests --test "test_create_document"
+
+# Run with coverage
+bench run-tests --app your_app --coverage
+
+# Run and stop on first failure
+bench run-tests --app your_app --failfast
+```
+
+### Testing Whitelisted API Methods
+
+```python
+class TestAPIMethods(FrappeTestCase):
+    def setUp(self):
+        super().setUp()
+        self.api_user = frappe.get_doc({
+            "doctype": "User",
+            "email": "api_user@example.com",
+            "first_name": "API",
+            "enabled": 1
+        })
+        self.api_user.insert()
+        frappe.add_roles(self.api_user.name, "System Manager")
+    
+    def test_api_success(self):
+        frappe.set_user(self.api_user.name)
+        try:
+            result = my_whitelisted_function(param="value")
+            self.assertIsInstance(result, dict)
+            self.assertTrue(result.get("success"))
+        finally:
+            frappe.set_user("Administrator")
+    
+    def test_api_permission_denied(self):
+        limited_user = frappe.get_doc({
+            "doctype": "User",
+            "email": "limited@example.com",
+            "first_name": "Limited",
+            "enabled": 1
+        })
+        limited_user.insert()
+        
+        frappe.set_user(limited_user.name)
+        try:
+            with self.assertRaises(frappe.PermissionError):
+                my_whitelisted_function(param="value")
+        finally:
+            frappe.set_user("Administrator")
+```
+
+### Test Series Reference
+
+The full unit testing guide spans 10 parts:
+- Part 1: Fundamentals (test structure, base classes, discovery)
+- Part 2: Test Commands and Execution
+- Part 3: Test Patterns and Best Practices
+- Part 4: Advanced Testing Techniques
+- Part 5: Test Data Management
+- Part 6: Test Utilities and Techniques
+- Part 7: Assertions
+- Part 8: Reports
+- Part 9: Test Records
+- Part 10: Improving Test Coverage
+
+
+---
+
+## 📌 Addendum: Frappe Unit Testing — The Complete Reference
+
+### Testing Architecture Overview
+
+Frappe uses Python's `unittest` framework with a custom `FrappeTestCase` base class that provides:
+- Automatic database rollback after each test
+- Thread-local variable cleanup
+- Cache clearing between tests
+- Custom assertion methods
+- User context management (`set_user`, `freeze_time`)
+
+### Enabling Tests
+
+```bash
+# Enable tests for a site (required before running any tests)
+bench --site [site-name] set-config allow_tests true
+```
+
+### Test Commands Reference
+
+```bash
+# Run all tests
+bench --site [site] run-tests
+
+# Run tests for a specific app
+bench --site [site] run-tests --app my_app
+
+# Run tests for a specific DocType
+bench --site [site] run-tests --doctype "Sales Order"
+
+# Run a specific test method
+bench --site [site] run-tests --doctype "Sales Order" --test test_create_order
+
+# Run with verbose output
+bench --site [site] run-tests --app my_app --verbose
+
+# Stop on first failure
+bench --site [site] run-tests --app my_app --failfast
+
+# Skip test record creation (when records already exist)
+bench --site [site] run-tests --doctype "Sales Order" --skip-test-records
+
+# Generate coverage report
+bench --site [site] run-tests --app my_app --coverage
+
+# Run parallel tests (for CI/CD)
+bench --site [site] run-parallel-tests --app my_app --build-number 1 --total-builds 4
+```
+
+### Quick Testing (Without Full Test Suite)
+
+```bash
+# Test a specific patch
+bench execute my_app.patches.v1_0.my_patch.execute
+
+# Trigger a scheduler event manually
+bench trigger-scheduler-event my_app.tasks.daily_task
+
+# Test translations
+bench --site [site] console
+# Then: frappe.lang = "ar"; frappe._("hello")
+
+# Test notifications
+bench console
+# Then: from frappe.email.doctype.notification.notification import trigger_daily_alerts; trigger_daily_alerts()
+```
+
+### Test File Structure
+
+```
+your_app/
+└── your_app/
+    └── module/
+        └── doctype/
+            └── my_doctype/
+                ├── my_doctype.py
+                ├── test_my_doctype.py    # Test file
+                └── test_records.json     # Test data
+```
+
+### Base Test Class
+
+```python
+import frappe
+from frappe.tests.utils import FrappeTestCase
+
+class TestMyDocType(FrappeTestCase):
+    """All tests inherit from FrappeTestCase"""
+    
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()  # ALWAYS call super()
+        # Expensive setup done once for all tests
+        cls.shared_data = frappe.get_doc("Company", "_Test Company")
+    
+    def setUp(self):
+        super().setUp()
+        # Fresh setup before each test
+        self.test_doc = frappe.get_doc({
+            "doctype": "MyDocType",
+            "field1": "value1"
+        }).insert()
+    
+    def test_something(self):
+        self.assertEqual(self.test_doc.field1, "value1")
+```
+
+### Test Data: test_records.json
+
+```json
+[
+  {
+    "doctype": "MyDocType",
+    "field1": "_Test Value 1",
+    "field2": "value2"
+  },
+  {
+    "doctype": "MyDocType",
+    "field1": "_Test Value 2",
+    "docstatus": 1
+  }
+]
+```
+
+Frappe automatically:
+1. Detects all Link fields (dependencies)
+2. Creates dependencies first (recursively)
+3. Creates your records last
+4. Caches in `.test_log` to avoid recreation
+
+### Declaring Dependencies
+
+```python
+# test_my_doctype.py
+test_dependencies = ["Company", "Customer", "Item"]
+test_ignore = ["Account"]  # Break circular dependencies
+
+class TestMyDocType(FrappeTestCase):
+    pass  # Dependencies created automatically
+```
+
+### Context Managers
+
+```python
+class TestMyDocType(FrappeTestCase):
+    def test_user_context(self):
+        with self.set_user("test@example.com"):
+            # All operations run as this user
+            doc = frappe.get_doc("MyDocType", "test-doc")
+    
+    def test_frozen_time(self):
+        with self.freeze_time("2024-01-15 10:00:00"):
+            # All datetime operations use frozen time
+            doc = frappe.get_doc({"doctype": "MyDocType"}).insert()
+            self.assertEqual(str(doc.creation.date()), "2024-01-15")
+    
+    def test_query_performance(self):
+        with self.assertQueryCount(5):
+            # Fails if more than 5 SQL queries are executed
+            frappe.get_all("MyDocType", limit=10)
+    
+    def test_rows_read(self):
+        with self.assertRowsRead(100):
+            frappe.get_all("MyDocType", limit=100)
+```
+
+### Frappe-Specific Assertions
+
+```python
+def test_document_equal(self):
+    expected = {
+        "field1": "value1",
+        "field2": 100,
+        "items": [
+            {"item_code": "ITEM-001", "qty": 10}
+        ]
+    }
+    actual = frappe.get_doc("MyDocType", "test-doc")
+    self.assertDocumentEqual(expected, actual)  # Handles floats, child tables, datetimes
+
+def test_subset(self):
+    all_roles = ["Employee", "Manager", "Admin"]
+    user_roles = ["Employee", "Manager"]
+    self.assertSequenceSubset(all_roles, user_roles)
+```
+
+### Mocking
+
+```python
+from unittest.mock import patch, Mock
+
+class TestWithMocks(FrappeTestCase):
+    @patch('frappe.sendmail')
+    def test_email_not_sent(self, mock_sendmail):
+        # Code that calls frappe.sendmail
+        trigger_notification()
+        mock_sendmail.assert_called_once()
+    
+    @patch.dict(frappe.conf, {"developer_mode": 0})
+    def test_production_mode(self):
+        self.assertEqual(frappe.conf.developer_mode, 0)
+    
+    def test_with_context_patch(self):
+        with patch('frappe.get_doc') as mock_get_doc:
+            mock_doc = Mock()
+            mock_doc.name = "test-doc"
+            mock_get_doc.return_value = mock_doc
+            
+            result = frappe.get_doc("MyDocType", "test-doc")
+            self.assertEqual(result.name, "test-doc")
+```
+
+### Testing API Methods
+
+```python
+from frappe.tests.test_api import FrappeAPITestCase
+
+class TestMyAPI(FrappeAPITestCase):
+    version = "v1"
+    
+    def test_get_resource(self):
+        response = self.get(self.resource("MyDocType", "test-doc"))
+        self.assertEqual(response.status_code, 200)
+    
+    def test_create_resource(self):
+        data = {"doctype": "MyDocType", "field1": "value1"}
+        response = self.post(self.resource("MyDocType"), data)
+        self.assertEqual(response.status_code, 200)
+    
+    def test_api_method(self):
+        response = self.get(self.method("my_app.api.my_function"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["message"], "expected_value")
+```
+
+### Testing Reports
+
+```python
+from frappe.tests.utils import FrappeTestCase
+from my_app.module.report.my_report.my_report import execute
+
+class TestMyReport(FrappeTestCase):
+    def setUp(self):
+        self.filters = frappe._dict(
+            company="_Test Company",
+            from_date="2021-01-01",
+            to_date="2021-12-31",
+        )
+    
+    def test_report_execution(self):
+        columns, data = execute(self.filters)
+        self.assertIsInstance(columns, list)
+        self.assertGreater(len(columns), 0)
+        self.assertIsInstance(data, list)
+    
+    def test_report_data_structure(self):
+        columns, data = execute(self.filters)
+        if data:
+            for col in columns:
+                self.assertIn("fieldname", col)
+                self.assertIn("label", col)
+```
+
+### Coverage Configuration
+
+Create `.coveragerc` in your app root to get accurate coverage:
+
+```ini
+[run]
+omit =
+    tests/*
+    **/test_*.py
+    **/__init__.py
+    **/doctype/*/*.py          # Auto-generated DocType files
+    **/doctype/*/*_dashboard.py
+    **/patches/*
+    **/commands/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    def __repr__
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    @(abc\.)?abstractmethod
+```
+
+Use `# pragma: no cover` for code that genuinely shouldn't be unit tested:
+
+```python
+if TYPE_CHECKING:  # pragma: no cover
+    from frappe.types import DF
+
+if __name__ == "__main__":  # pragma: no cover
+    main()
+```
+
+### Factory Functions Pattern
+
+For complex test data, use factory functions:
+
+```python
+def make_test_asset(asset_name="Test Asset", **kwargs):
+    """Factory function for creating test assets"""
+    defaults = {
+        "doctype": "Asset",
+        "asset_name": asset_name,
+        "asset_category": "_Test Asset Category",
+        "company": "_Test Company",
+        "purchase_date": "2024-01-01",
+        "purchase_cost": 1000.00,
+    }
+    defaults.update(kwargs)
+    
+    doc = frappe.get_doc(defaults)
+    if not kwargs.get("do_not_save"):
+        doc.insert()
+        if not kwargs.get("do_not_submit"):
+            doc.submit()
+    return doc
+
+# Usage
+asset = make_test_asset(purchase_cost=5000)
+asset_draft = make_test_asset(do_not_submit=True)
+```
+
+### Common Exception Types
+
+```python
+frappe.ValidationError      # HTTP 417 — default for frappe.throw()
+frappe.MandatoryError       # Missing required field
+frappe.PermissionError      # HTTP 403
+frappe.DoesNotExistError    # HTTP 404
+frappe.DuplicateEntryError  # Duplicate record
+frappe.LinkValidationError  # Invalid link reference
+
+# Usage in tests
+with self.assertRaises(frappe.ValidationError):
+    doc.insert()
+
+with self.assertRaises(frappe.PermissionError):
+    frappe.get_doc("Restricted DocType", "name")
+```

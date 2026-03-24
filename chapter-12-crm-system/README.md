@@ -2377,3 +2377,244 @@ Building a complete CRM system requires:
 ---
 
 **Next Chapter**: Project management system with task automation and reporting.
+
+
+---
+
+## Addendum: Practical CRM Patterns in Frappe
+
+### Lead Capture API
+
+```python
+import frappe
+from frappe.rate_limiter import rate_limit
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(limit=10, seconds=60)
+def capture_lead(lead_name, email, phone=None, source="Website", company=None):
+    """Public lead capture endpoint with duplicate detection"""
+    # Check for duplicate by email
+    existing = frappe.db.get_value("Lead", {"email_id": email}, "name")
+    if existing:
+        # Update existing lead instead of creating duplicate
+        frappe.db.set_value("Lead", existing, "source", source)
+        return {"status": "existing", "lead": existing}
+
+    lead = frappe.new_doc("Lead")
+    lead.lead_name = lead_name
+    lead.email_id = email
+    lead.mobile_no = phone
+    lead.company_name = company
+    lead.source = source
+    lead.status = "Lead"
+    lead.insert(ignore_permissions=True)
+
+    # Trigger welcome email via background job
+    frappe.enqueue(
+        "myapp.crm.emails.send_lead_welcome",
+        lead_name=lead.name,
+        queue="short"
+    )
+
+    return {"status": "created", "lead": lead.name}
+```
+
+### Lead Scoring
+
+```python
+def calculate_lead_score(lead_name):
+    """Score a lead based on profile completeness and activity"""
+    lead = frappe.get_doc("Lead", lead_name)
+    score = 0
+
+    # Profile completeness
+    if lead.email_id:       score += 10
+    if lead.mobile_no:      score += 10
+    if lead.company_name:   score += 15
+    if lead.website:        score += 5
+
+    # Source quality
+    source_scores = {
+        "Referral": 30, "Cold Calling": 10,
+        "Website": 20, "Advertisement": 15
+    }
+    score += source_scores.get(lead.source, 5)
+
+    # Recent activity
+    recent_comms = frappe.db.count("Communication", {
+        "reference_doctype": "Lead",
+        "reference_name": lead_name,
+        "communication_date": [">=", frappe.utils.add_to_date(frappe.utils.now(), days=-30)]
+    })
+    score += min(recent_comms * 5, 20)
+
+    frappe.db.set_value("Lead", lead_name, "lead_score", score)
+    return score
+```
+
+### Lead-to-Opportunity Conversion
+
+```python
+@frappe.whitelist()
+def convert_lead(lead_name, opportunity_amount=None, closing_date=None):
+    """Convert a lead to customer + opportunity"""
+    lead = frappe.get_doc("Lead", lead_name)
+
+    if lead.status == "Converted":
+        frappe.throw("Lead is already converted")
+
+    # Create customer
+    customer = frappe.new_doc("Customer")
+    customer.customer_name = lead.lead_name
+    customer.customer_type = "Individual" if not lead.company_name else "Company"
+    customer.email_id = lead.email_id
+    customer.mobile_no = lead.mobile_no
+    customer.lead_name = lead_name
+    customer.insert()
+
+    # Create opportunity
+    opportunity = frappe.new_doc("Opportunity")
+    opportunity.opportunity_from = "Customer"
+    opportunity.party_name = customer.name
+    opportunity.lead = lead_name
+    opportunity.opportunity_amount = opportunity_amount or 0
+    opportunity.closing_date = closing_date or frappe.utils.add_to_date(
+        frappe.utils.nowdate(), days=30)
+    opportunity.status = "Open"
+    opportunity.insert()
+
+    # Update lead
+    lead.status = "Converted"
+    lead.customer = customer.name
+    lead.save()
+
+    return {
+        "customer": customer.name,
+        "opportunity": opportunity.name
+    }
+```
+
+### CRM Automation via Hooks
+
+```python
+# hooks.py
+doc_events = {
+    "Lead": {
+        "after_insert": "myapp.crm.automation.on_lead_created",
+        "on_update": "myapp.crm.automation.on_lead_updated"
+    },
+    "Opportunity": {
+        "on_update": "myapp.crm.automation.on_opportunity_updated"
+    }
+}
+```
+
+```python
+# myapp/crm/automation.py
+import frappe
+
+def on_lead_created(doc, method):
+    """Auto-assign lead and send notification"""
+    # Auto-assign based on round-robin
+    sales_users = frappe.get_all("User",
+        filters={"role_profile_name": "Sales User", "enabled": 1},
+        fields=["name"],
+        order_by="creation")
+
+    if sales_users:
+        # Simple round-robin: assign to user with fewest open leads
+        assigned_user = _get_least_loaded_user(sales_users)
+        doc.lead_owner = assigned_user
+        doc.db_set("lead_owner", assigned_user)
+
+    # Create follow-up task
+    frappe.enqueue(
+        "myapp.crm.tasks.create_followup_task",
+        lead_name=doc.name,
+        assigned_to=doc.lead_owner,
+        queue="short"
+    )
+
+def on_opportunity_updated(doc, method):
+    """Alert manager when opportunity reaches proposal stage"""
+    if doc.has_value_changed("stage") and doc.stage == "Proposal/Price Quote":
+        manager = frappe.db.get_value("User",
+            {"role_profile_name": "Sales Manager", "enabled": 1}, "name")
+        if manager:
+            frappe.sendmail(
+                recipients=[manager],
+                subject=f"Opportunity {doc.name} reached Proposal stage",
+                message=f"Customer: {doc.party_name}, Amount: {doc.opportunity_amount}"
+            )
+
+def _get_least_loaded_user(users):
+    user_names = [u.name for u in users]
+    counts = {u: frappe.db.count("Lead", {"lead_owner": u, "status": "Lead"})
+              for u in user_names}
+    return min(counts, key=counts.get)
+```
+
+### CRM Dashboard Report
+
+```python
+@frappe.whitelist()
+def get_crm_dashboard(from_date=None, to_date=None):
+    """CRM pipeline summary"""
+    from_date = from_date or frappe.utils.month_start()
+    to_date = to_date or frappe.utils.month_end()
+
+    return {
+        "leads": {
+            "total": frappe.db.count("Lead", {
+                "creation": ["between", [from_date, to_date]]
+            }),
+            "converted": frappe.db.count("Lead", {
+                "status": "Converted",
+                "creation": ["between", [from_date, to_date]]
+            }),
+            "by_source": frappe.db.sql("""
+                SELECT source, COUNT(*) as count
+                FROM `tabLead`
+                WHERE DATE(creation) BETWEEN %(from_date)s AND %(to_date)s
+                GROUP BY source
+                ORDER BY count DESC
+            """, {"from_date": from_date, "to_date": to_date}, as_dict=True)
+        },
+        "opportunities": {
+            "open": frappe.db.count("Opportunity", {"status": "Open"}),
+            "pipeline_value": frappe.db.sql("""
+                SELECT SUM(opportunity_amount) as total
+                FROM `tabOpportunity`
+                WHERE status = 'Open'
+            """)[0][0] or 0,
+            "by_stage": frappe.db.sql("""
+                SELECT stage, COUNT(*) as count, SUM(opportunity_amount) as value
+                FROM `tabOpportunity`
+                WHERE status = 'Open'
+                GROUP BY stage
+            """, as_dict=True)
+        }
+    }
+```
+
+### Communication Logging
+
+```python
+@frappe.whitelist()
+def log_communication(lead_name, comm_type, subject, content, direction="Outgoing"):
+    """Log a communication against a lead"""
+    comm = frappe.new_doc("Communication")
+    comm.communication_type = comm_type  # "Phone", "Email", "Meeting"
+    comm.subject = subject
+    comm.content = content
+    comm.sent_or_received = direction
+    comm.reference_doctype = "Lead"
+    comm.reference_name = lead_name
+    comm.communication_date = frappe.utils.now()
+    comm.insert(ignore_permissions=True)
+
+    # Update lead's last contact date
+    frappe.db.set_value("Lead", lead_name, "last_contact_date", frappe.utils.nowdate())
+
+    return comm.name
+```

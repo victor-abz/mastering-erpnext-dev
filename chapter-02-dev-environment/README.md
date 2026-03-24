@@ -771,3 +771,247 @@ bench --site dev.local execute my_custom_app.utils.fix_data
 - Always run `bench migrate` after pulling upstream changes that include schema updates.
 - `bench clear-cache` is the first thing to try when you see stale data or unexpected UI behaviour.
 - `bench restart` is needed after changing `hooks.py` or Python files that are cached by gunicorn workers.
+
+
+---
+
+## Addendum: Source Article Insights
+
+### Frappe Installation: Step-by-Step
+
+The complete installation sequence for Ubuntu/Debian:
+
+```bash
+# 1. Update system
+sudo apt-get update -y && sudo apt-get upgrade -y
+
+# 2. Install Git
+sudo apt-get install git
+
+# 3. Install Python
+sudo apt-get install python3-dev python3.10-dev python3-setuptools python3-pip python3-distutils
+sudo apt-get install python3.10-venv
+sudo apt-get install software-properties-common
+
+# 4. Install MariaDB
+sudo apt install mariadb-server mariadb-client
+sudo mysql_secure_installation
+# Prompts: unix_socket=Y, change root password=Y, remove anonymous=Y,
+#          disallow remote root=N, remove test db=Y, reload privileges=Y
+
+# 5. Configure MariaDB for utf8mb4
+sudo nano /etc/mysql/my.cnf
+# Add at end of file:
+# [mysqld]
+# character-set-client-handshake = FALSE
+# character-set-server = utf8mb4
+# collation-server = utf8mb4_unicode_ci
+# [mysql]
+# default-character-set = utf8mb4
+sudo service mysql restart
+
+# 6. Install Redis
+sudo apt-get install redis-server
+
+# 7. Install wkhtmltopdf and other packages
+sudo apt-get install xvfb libfontconfig wkhtmltopdf
+sudo apt-get install libmysqlclient-dev
+
+# 8. Install Node.js via nvm
+curl https://raw.githubusercontent.com/creationix/nvm/master/install.sh | bash
+source ~/.profile
+nvm install 18
+sudo apt-get install npm
+sudo npm install -g yarn
+
+# 9. Install Frappe Bench
+sudo pip3 install frappe-bench
+
+# 10. Initialize bench
+bench init --frappe-branch version-15 frappe-bench
+cd frappe-bench
+
+# 11. Create a site
+bench new-site mysite.local
+bench --site mysite.local enable-scheduler
+bench --site mysite.local set-maintenance-mode off
+bench --site mysite.local set-config server_script_enabled true
+
+# 12. Enable developer mode (dev machines only)
+bench set-config -g developer_mode true
+
+# 13. Add site to hosts and start
+bench --site mysite.local add-to-hosts
+bench start
+```
+
+---
+
+### Bench Command Reference
+
+Bench is Frappe's CLI tool — a wrapper around multiple services that power the ecosystem. It runs exclusively on Unix-like systems (Linux, macOS) due to process forking, symbolic links, and shell environment requirements.
+
+**Site Management:**
+```bash
+bench new-site mysite.local                    # Create new site
+bench new-site mysite.local --install-app erpnext  # Create + install app
+bench use mysite.local                         # Set default site
+bench drop-site mysite.local --no-backup       # Remove site
+bench reinstall --admin-password newpass       # Wipe and reinstall
+bench migrate                                  # Run DB migrations + patches
+bench --site mysite.local add-to-hosts         # Add to /etc/hosts
+```
+
+**App Management:**
+```bash
+bench get-app https://github.com/frappe/erpnext  # Download app
+bench get-app erpnext --branch version-15        # Specific branch
+bench install-app erpnext                        # Install to current site
+bench uninstall-app myapp --yes                  # Remove from site
+bench list-apps                                  # List installed apps
+```
+
+**Development:**
+```bash
+bench start          # Start all services (dev)
+bench serve          # Start web server only
+bench watch          # Watch + compile assets
+bench build          # Compile JS/CSS assets
+bench build --app myapp --production  # Production build
+bench console        # Interactive Python console
+bench execute "frappe.get_doc('User', 'Administrator')"  # Run Python
+```
+
+**Database:**
+```bash
+bench mariadb                                    # MariaDB console
+bench db-console                                 # Auto-detect DB type
+bench add-database-index --doctype "User" --column "email"
+bench describe-database-table --doctype "User"
+```
+
+**Cache & Users:**
+```bash
+bench clear-cache                                # Clear all caches
+bench clear-website-cache                        # Website cache only
+bench destroy-all-sessions --reason "Maintenance"
+bench set-admin-password newpass --logout-all-sessions
+bench add-user user@example.com --add-role "System Manager"
+```
+
+**Backup & Restore:**
+```bash
+bench backup --with-files --compress
+bench restore backup.sql --with-public-files public.tar
+bench restore backup.sql --admin-password newpass --force
+```
+
+**Testing:**
+```bash
+bench run-tests --app myapp
+bench run-tests --doctype "Sales Invoice" --coverage
+bench run-ui-tests myapp --headless
+```
+
+**Production Setup:**
+```bash
+bench setup production    # Configure nginx + supervisor
+bench setup nginx         # Nginx config only
+bench setup supervisor    # Supervisor config only
+bench setup redis         # Redis config
+bench doctor              # System health check
+bench version             # Show all versions
+bench update --app erpnext  # Update specific app
+```
+
+**Configuration:**
+```bash
+bench set-config db_host localhost
+bench set-config redis_cache localhost:13000
+bench set-config --global developer_mode true
+bench show-config --format json
+```
+
+**Quick reference cheat sheet:**
+```bash
+# Daily dev workflow
+bench start                    # Start everything
+bench clear-cache              # Fix stale data/UI
+bench migrate                  # After schema changes
+bench restart                  # After hooks.py changes
+
+# Troubleshooting
+bench doctor                   # Check system health
+bench clear-cache              # First thing to try
+tail -f logs/frappe.log        # Watch logs
+bench mariadb                  # Direct DB access
+```
+
+---
+
+### What Happens When `bench start`
+
+`bench start` uses **Honcho** (a Python process manager inspired by Heroku's Foreman) to read the `Procfile` and start all services simultaneously.
+
+**The Procfile defines these processes:**
+
+```
+web:       bench serve --port 8000
+redis_cache:  redis-server config/redis_cache.conf
+redis_queue:  redis-server config/redis_queue.conf
+socketio:  node apps/frappe/socketio.js
+schedule:  bench schedule
+worker:    bench worker
+watch:     bench watch
+```
+
+**What each process does:**
+
+| Process | Purpose | Notes |
+|---------|---------|-------|
+| `web` | HTTP server (Werkzeug in dev, Gunicorn in prod) | Port 8000 |
+| `redis_cache` | Sessions, page cache, API response cache | Port 13000 |
+| `redis_queue` | Background job queues, inter-process comms | Port 11000 |
+| `socketio` | WebSocket real-time updates (Node.js) | Notifications, progress |
+| `schedule` | Enqueues cron jobs into Redis queue | Does NOT execute jobs |
+| `worker` | Executes jobs from Redis queue | RQ (Redis Queue) workers |
+| `watch` | Watches files, rebuilds assets on change | Dev only |
+
+**Key architecture insight — the database is NOT in the Procfile:**
+```
+MariaDB runs as its own independent system service.
+Bench connects to it; it doesn't manage it.
+Each site gets its own database.
+```
+
+**How SocketIO works (Python can't handle WebSockets directly):**
+```
+Client ←→ SocketIO Server (Node.js) ←→ Redis Queue ←→ Python Web Server
+```
+The Python server publishes events to Redis. The Node.js SocketIO server subscribes to Redis and pushes events to connected clients.
+
+**Scheduler vs Worker distinction:**
+```python
+# Scheduler: only enqueues jobs at the right time
+# Worker: actually executes the jobs
+
+# Scheduler puts job in queue:
+frappe.enqueue("myapp.tasks.send_report", queue="long")
+
+# Worker picks it up and runs it:
+# bench worker --queue long
+```
+
+**Production vs Development:**
+- Dev: Werkzeug (single-threaded, auto-reload, debugger)
+- Prod: Gunicorn (multi-process, no debugger)
+
+```json
+// common_site_config.json for production
+{
+  "gunicorn_workers": 17,
+  "webserver_port": 8000
+}
+```
+
+Configure production with: `bench setup production`

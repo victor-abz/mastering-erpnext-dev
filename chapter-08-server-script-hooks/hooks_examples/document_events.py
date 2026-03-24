@@ -178,7 +178,8 @@ def after_sales_order_delete(doc, method):
 	doc.name is still accessible but the record no longer exists in DB.
 	Use this for post-deletion side effects (e.g. clearing caches).
 	"""
-	frappe.cache().delete_key(f"sales_order_summary_{doc.name}")
+	# v15: frappe.cache is a property, not a method call
+	frappe.cache.delete_key(f"sales_order_summary_{doc.name}")
 
 
 # Register these in hooks.py:

@@ -2847,3 +2847,297 @@ Building a complete project management system requires:
 ---
 
 **Book Conclusion**: You've now mastered the complete ERPNext development ecosystem from architecture to advanced applications.
+
+
+---
+
+## Addendum: Practical Project Management Patterns in Frappe
+
+### Creating Projects and Tasks via API
+
+```python
+import frappe
+from frappe.utils import nowdate, add_to_date
+
+@frappe.whitelist()
+def create_project(project_name, customer=None, start_date=None,
+                   end_date=None, estimated_cost=None):
+    """Create a project with sensible defaults"""
+    project = frappe.new_doc("Project")
+    project.project_name = project_name
+    project.customer = customer
+    project.status = "Open"
+    project.expected_start_date = start_date or nowdate()
+    project.expected_end_date = end_date or add_to_date(nowdate(), days=30)
+    project.estimated_costing = estimated_cost or 0
+    project.insert()
+    return {"project": project.name}
+
+@frappe.whitelist()
+def create_task(project, subject, assigned_to=None, due_date=None,
+                priority="Medium", depends_on=None):
+    """Create a task, optionally with dependencies"""
+    task = frappe.new_doc("Task")
+    task.subject = subject
+    task.project = project
+    task.assigned_to = assigned_to
+    task.exp_end_date = due_date or add_to_date(nowdate(), days=7)
+    task.priority = priority
+    task.status = "Open"
+    task.insert()
+
+    # Set up dependencies
+    if depends_on:
+        for dep_task in (depends_on if isinstance(depends_on, list) else [depends_on]):
+            task.append("depends_on", {"task": dep_task})
+        task.save()
+
+    return {"task": task.name}
+```
+
+### Task Status Transitions
+
+```python
+@frappe.whitelist()
+def update_task_status(task_name, new_status, notes=None):
+    """Update task status with dependency validation"""
+    allowed_transitions = {
+        "Open": ["In Progress", "On Hold", "Cancelled"],
+        "In Progress": ["Completed", "On Hold", "Cancelled"],
+        "On Hold": ["In Progress", "Cancelled"],
+    }
+
+    task = frappe.get_doc("Task", task_name)
+
+    if new_status not in allowed_transitions.get(task.status, []):
+        frappe.throw(f"Cannot move from '{task.status}' to '{new_status}'")
+
+    # Check dependencies before completing
+    if new_status == "Completed":
+        incomplete_deps = frappe.get_all("Task Depends On",
+            filters={"parent": task_name},
+            fields=["task"])
+
+        for dep in incomplete_deps:
+            dep_status = frappe.db.get_value("Task", dep.task, "status")
+            if dep_status != "Completed":
+                frappe.throw(
+                    f"Cannot complete: dependency '{dep.task}' is still '{dep_status}'"
+                )
+
+        task.completed_on = frappe.utils.now()
+
+    task.status = new_status
+    if notes:
+        task.add_comment("Comment", notes)
+    task.save()
+
+    # Update project percent complete
+    _update_project_progress(task.project)
+
+    return {"status": new_status}
+
+def _update_project_progress(project_name):
+    """Recalculate project completion percentage"""
+    if not project_name:
+        return
+
+    total = frappe.db.count("Task", {"project": project_name})
+    completed = frappe.db.count("Task", {"project": project_name, "status": "Completed"})
+
+    if total > 0:
+        percent = round((completed / total) * 100, 1)
+        frappe.db.set_value("Project", project_name, "percent_complete", percent)
+```
+
+### Time Logging
+
+```python
+@frappe.whitelist()
+def log_time(task_name, hours, activity_type="Execution", description=None):
+    """Log time against a task"""
+    task = frappe.get_doc("Task", task_name)
+
+    timelog = frappe.new_doc("Timesheet")
+    timelog.employee = frappe.db.get_value("Employee",
+        {"user_id": frappe.session.user}, "name")
+
+    timelog.append("time_logs", {
+        "activity_type": activity_type,
+        "task": task_name,
+        "project": task.project,
+        "from_time": frappe.utils.now(),
+        "hours": hours,
+        "description": description or ""
+    })
+
+    timelog.insert()
+    timelog.submit()
+
+    return {"timesheet": timelog.name, "hours_logged": hours}
+```
+
+### Project Dashboard
+
+```python
+@frappe.whitelist()
+def get_project_dashboard(project_name):
+    """Comprehensive project status in one call"""
+    project = frappe.get_doc("Project", project_name)
+    today = frappe.utils.today()
+
+    tasks = frappe.get_all("Task",
+        filters={"project": project_name},
+        fields=["name", "status", "priority", "exp_end_date", "assigned_to"])
+
+    overdue = [t for t in tasks
+               if t.status not in ("Completed", "Cancelled")
+               and t.exp_end_date and t.exp_end_date < today]
+
+    # Total hours logged
+    hours_logged = frappe.db.sql("""
+        SELECT SUM(tl.hours) as total
+        FROM `tabTimesheet Detail` tl
+        WHERE tl.project = %(project)s
+    """, {"project": project_name})[0][0] or 0
+
+    return {
+        "project": {
+            "name": project.project_name,
+            "status": project.status,
+            "percent_complete": project.percent_complete or 0,
+            "expected_end_date": str(project.expected_end_date or ""),
+            "days_remaining": (
+                (frappe.utils.getdate(project.expected_end_date) -
+                 frappe.utils.getdate(today)).days
+                if project.expected_end_date else None
+            )
+        },
+        "tasks": {
+            "total": len(tasks),
+            "completed": sum(1 for t in tasks if t.status == "Completed"),
+            "in_progress": sum(1 for t in tasks if t.status == "In Progress"),
+            "overdue": len(overdue),
+            "overdue_list": [{"name": t.name, "assigned_to": t.assigned_to} for t in overdue]
+        },
+        "hours_logged": hours_logged
+    }
+```
+
+### Automated Notifications via Hooks
+
+```python
+# hooks.py
+doc_events = {
+    "Task": {
+        "on_update": "myapp.pm.notifications.on_task_update"
+    },
+    "Project": {
+        "on_update": "myapp.pm.notifications.on_project_update"
+    }
+}
+
+scheduler_events = {
+    "daily": ["myapp.pm.notifications.send_overdue_task_alerts"]
+}
+```
+
+```python
+# myapp/pm/notifications.py
+import frappe
+
+def on_task_update(doc, method):
+    """Notify assignee when task is assigned or status changes"""
+    if doc.has_value_changed("assigned_to") and doc.assigned_to:
+        frappe.sendmail(
+            recipients=[doc.assigned_to],
+            subject=f"Task assigned: {doc.subject}",
+            message=f"You have been assigned task '{doc.subject}' "
+                    f"in project '{doc.project}'. Due: {doc.exp_end_date}"
+        )
+
+    if doc.has_value_changed("status") and doc.status == "Completed":
+        # Notify project manager
+        pm = frappe.db.get_value("Project", doc.project, "project_manager")
+        if pm:
+            frappe.sendmail(
+                recipients=[pm],
+                subject=f"Task completed: {doc.subject}",
+                message=f"Task '{doc.subject}' has been marked complete."
+            )
+
+def send_overdue_task_alerts():
+    """Daily job: alert assignees about overdue tasks"""
+    today = frappe.utils.today()
+
+    overdue = frappe.get_all("Task",
+        filters={
+            "status": ["in", ["Open", "In Progress"]],
+            "exp_end_date": ["<", today]
+        },
+        fields=["name", "subject", "project", "assigned_to", "exp_end_date"])
+
+    # Group by assignee
+    by_user = {}
+    for task in overdue:
+        if task.assigned_to:
+            by_user.setdefault(task.assigned_to, []).append(task)
+
+    for user, tasks in by_user.items():
+        task_list = "\n".join(
+            f"- {t.subject} (due {t.exp_end_date}, project: {t.project})"
+            for t in tasks
+        )
+        frappe.sendmail(
+            recipients=[user],
+            subject=f"You have {len(tasks)} overdue task(s)",
+            message=f"Please review your overdue tasks:\n\n{task_list}"
+        )
+```
+
+### Project Report
+
+```python
+# Script Report: project_summary.py
+import frappe
+from frappe import _
+
+def execute(filters=None):
+    filters = frappe._dict(filters or {})
+    return get_columns(), get_data(filters)
+
+def get_columns():
+    return [
+        {"label": _("Project"), "fieldtype": "Link", "fieldname": "project",
+         "options": "Project", "width": 200},
+        {"label": _("Status"), "fieldtype": "Data", "fieldname": "status", "width": 100},
+        {"label": _("% Complete"), "fieldtype": "Percent", "fieldname": "percent_complete", "width": 100},
+        {"label": _("Total Tasks"), "fieldtype": "Int", "fieldname": "total_tasks", "width": 100},
+        {"label": _("Completed"), "fieldtype": "Int", "fieldname": "completed_tasks", "width": 100},
+        {"label": _("Overdue"), "fieldtype": "Int", "fieldname": "overdue_tasks", "width": 100},
+        {"label": _("Hours Logged"), "fieldtype": "Float", "fieldname": "hours_logged", "width": 120},
+    ]
+
+def get_data(filters):
+    conditions = ""
+    if filters.get("status"):
+        conditions = "AND p.status = %(status)s"
+
+    return frappe.db.sql(f"""
+        SELECT
+            p.name AS project,
+            p.status,
+            p.percent_complete,
+            COUNT(t.name) AS total_tasks,
+            SUM(CASE WHEN t.status = 'Completed' THEN 1 ELSE 0 END) AS completed_tasks,
+            SUM(CASE WHEN t.status NOT IN ('Completed','Cancelled')
+                     AND t.exp_end_date < CURDATE() THEN 1 ELSE 0 END) AS overdue_tasks,
+            COALESCE(SUM(tl.hours), 0) AS hours_logged
+        FROM `tabProject` p
+        LEFT JOIN `tabTask` t ON t.project = p.name
+        LEFT JOIN `tabTimesheet Detail` tl ON tl.project = p.name
+        WHERE p.status != 'Cancelled' {conditions}
+        GROUP BY p.name
+        ORDER BY p.expected_end_date
+    """, filters, as_dict=True)
+```

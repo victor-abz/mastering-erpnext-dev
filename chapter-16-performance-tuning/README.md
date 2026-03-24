@@ -2427,3 +2427,463 @@ Performance optimization requires systematic approach:
 ---
 
 **Next Chapter**: Building production deployment pipelines.
+
+
+---
+
+## 📌 Addendum: Production Request Timeout & Performance Tuning
+
+### 1. Check Background Workers and Scheduler
+
+```bash
+bench doctor
+```
+
+If workers or the scheduler are down, timeout issues and stuck jobs may occur.
+
+### 2. Increase HTTP Timeout
+
+```bash
+bench config http_timeout 600   # Timeout in seconds
+```
+
+### 3. Apply Config Changes
+
+```bash
+bench setup supervisor
+bench setup nginx
+sudo supervisorctl reload
+sudo service nginx reload
+```
+
+### 4. Increase Gunicorn Workers
+
+Edit `common_site_config.json`:
+
+```json
+{
+  "gunicorn_workers": 5
+}
+```
+
+Recommended formula: `workers = 2 * CPU cores + 1`
+
+```bash
+bench setup supervisor
+sudo supervisorctl reread
+sudo supervisorctl update
+bench restart
+```
+
+### 5. Tune MariaDB
+
+```bash
+sudo nano /etc/mysql/mariadb.conf.d/50-server.cnf
+```
+
+Under `[mysqld]`, add:
+
+```ini
+innodb_buffer_pool_size = 8G
+```
+
+RAM guidelines:
+- 2 GB RAM → 512M–1G
+- 4 GB RAM → 1G–2G
+- 8 GB RAM → 4G–6G
+
+```bash
+sudo systemctl restart mariadb
+mysql -u root -p -e "SHOW VARIABLES LIKE 'innodb_buffer_pool_size';"
+```
+
+### 6. Tune Redis
+
+```bash
+sudo nano /etc/redis/redis.conf
+```
+
+Add:
+
+```ini
+maxmemory 1gb
+maxmemory-policy allkeys-lru
+```
+
+```bash
+sudo systemctl restart redis
+redis-cli info memory
+```
+
+### 7. Enable Slow Query Log (MariaDB)
+
+```ini
+# In /etc/mysql/mariadb.conf.d/50-server.cnf
+slow_query_log = 1
+slow_query_log_file = /var/log/mysql/slow.log
+long_query_time = 2
+```
+
+### Performance Summary
+
+| Component | Action |
+|-----------|--------|
+| Frappe | Set HTTP timeout with `bench config` |
+| Supervisor/Nginx | Reload configs after changes |
+| Gunicorn | Increase workers in `common_site_config.json` |
+| MariaDB | Tune `innodb_buffer_pool_size` |
+| Redis | Set `maxmemory` and eviction policy |
+
+### Why Frappe Systems Freeze
+
+Common causes of system freezes:
+1. **Too many concurrent requests** — increase Gunicorn workers
+2. **Slow database queries** — add indexes, tune `innodb_buffer_pool_size`
+3. **Redis memory exhaustion** — set `maxmemory` with LRU eviction
+4. **Background job queue overflow** — check `bench doctor`, restart workers
+5. **Large file uploads** — increase Nginx `client_max_body_size`
+6. **Missing indexes** — use `frappe.db.add_index()` on frequently filtered columns
+7. **N+1 query problem** — use `frappe.get_all()` with explicit fields instead of looping `frappe.get_doc()`
+
+### Frappe Report Optimization
+
+```python
+# Bad: N+1 queries
+for order in frappe.get_all("Sales Order", fields=["name"]):
+    doc = frappe.get_doc("Sales Order", order.name)  # N queries!
+    process(doc)
+
+# Good: Single query with all needed fields
+orders = frappe.get_all(
+    "Sales Order",
+    fields=["name", "customer", "grand_total", "status"],
+    filters={"docstatus": 1}
+)
+for order in orders:
+    process(order)
+
+# Good: Use Query Builder for complex aggregations
+from frappe.query_builder.functions import Sum, Count
+SalesOrder = frappe.qb.DocType("Sales Order")
+result = (
+    frappe.qb.from_(SalesOrder)
+    .select(SalesOrder.customer, Sum(SalesOrder.grand_total).as_("total"))
+    .where(SalesOrder.docstatus == 1)
+    .groupby(SalesOrder.customer)
+).run(as_dict=True)
+```
+
+
+---
+
+## Addendum: Production Performance Tuning from the Field
+
+### Quick Diagnosis Checklist
+
+Before tuning anything, run `bench doctor` to check the health of workers and the scheduler:
+
+```bash
+bench doctor
+```
+
+Then check system resources:
+```bash
+htop                    # CPU and memory usage
+free -m                 # RAM and swap
+iostat -x 1 5           # Disk I/O
+redis-cli info memory   # Redis memory
+```
+
+### Fixing Request Timeouts
+
+```bash
+# Increase HTTP timeout for long-running requests
+bench config http_timeout 600
+
+# Regenerate supervisor and nginx configs
+bench setup supervisor
+bench setup nginx
+
+# Reload services (as root)
+sudo supervisorctl reload
+sudo service nginx reload
+```
+
+### Gunicorn Worker Tuning
+
+The recommended formula: `workers = 2 × CPU_cores + 1`
+
+```json
+// common_site_config.json
+{
+    "gunicorn_workers": 5
+}
+```
+
+```bash
+bench setup supervisor
+sudo supervisorctl reread
+sudo supervisorctl update
+bench restart
+```
+
+Too few workers = requests queue up and timeout. Too many = RAM exhaustion. Start with the formula and adjust based on observed memory usage.
+
+### MariaDB Tuning
+
+The most impactful single setting is `innodb_buffer_pool_size`. Set it to 70–80% of available RAM.
+
+```bash
+sudo nano /etc/mysql/mariadb.conf.d/50-server.cnf
+```
+
+```ini
+[mysqld]
+# Adjust based on your RAM:
+# 2 GB RAM  → 512M–1G
+# 4 GB RAM  → 1G–2G
+# 8 GB RAM  → 4G–6G
+# 16 GB RAM → 10G–12G
+innodb_buffer_pool_size = 4G
+
+# Enable slow query log to find bottlenecks
+slow_query_log = 1
+long_query_time = 1
+slow_query_log_file = /var/log/mysql/slow.log
+```
+
+```bash
+sudo systemctl restart mariadb
+
+# Verify
+mysql -u root -p -e "SHOW VARIABLES LIKE 'innodb_buffer_pool_size';"
+# Value shown in bytes: 4294967296 = 4G
+```
+
+**Find and kill stuck queries:**
+```sql
+SHOW FULL PROCESSLIST;
+-- Look for queries in "Sending data" or "Locked" state
+KILL <thread_id>;
+```
+
+**Analyze slow queries:**
+```sql
+-- Enable from bench console
+SET GLOBAL slow_query_log = 1;
+SET GLOBAL long_query_time = 1;
+```
+
+Then use `EXPLAIN` on slow queries:
+```python
+result = frappe.db.sql("""
+    EXPLAIN SELECT name, customer FROM `tabSales Order`
+    WHERE posting_date BETWEEN '2024-01-01' AND '2024-12-31'
+""", as_dict=True)
+
+for row in result:
+    print(f"Type: {row.type}, Rows: {row.rows}, Extra: {row.Extra}")
+# type=ALL means full table scan — add an index
+# type=range or ref means index is being used — good
+```
+
+### Redis Tuning
+
+```bash
+sudo nano /etc/redis/redis.conf
+```
+
+```ini
+# Set a memory cap — without this, Redis grows unbounded
+maxmemory 1gb
+maxmemory-policy allkeys-lru
+```
+
+```bash
+sudo systemctl restart redis
+
+# Verify
+redis-cli info memory
+# Look for: maxmemory, used_memory, maxmemory_policy
+```
+
+**Enable Redis caching in Frappe:**
+```json
+// common_site_config.json
+{
+    "cache": {
+        "enabled": 1,
+        "redis_server": "redis://localhost:6379"
+    }
+}
+```
+
+### Swap — The Silent Killer
+
+A server with no swap will freeze when RAM is exhausted. Always have swap enabled.
+
+```bash
+free -m  # Check if swap is 0
+
+# Add 2GB swap if missing
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+
+# Make permanent
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+# Reduce swap aggressiveness (use RAM first)
+echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+```
+
+### Why the System Freezes — Root Causes
+
+**CPU overload:**
+- Too many Gunicorn workers for available cores
+- Heavy background jobs (bulk imports, large reports)
+- Custom scripts with inefficient loops
+
+Fix: Check `htop`, reduce workers, optimize custom code, use `frappe.enqueue` for heavy tasks.
+
+**Memory exhaustion:**
+- No swap configured
+- Redis growing without `maxmemory` limit
+- Reports loading millions of rows into Python
+
+Fix: Add swap, set Redis `maxmemory`, add LIMIT clauses to reports.
+
+**MariaDB locks:**
+- Long-running queries locking tables
+- Missing indexes causing full table scans
+- Deadlocks from concurrent writes
+
+Fix: Enable slow query log, add indexes, use `SHOW FULL PROCESSLIST` to find locks.
+
+**Redis issues:**
+- Redis down → Frappe cache misses → DB overload
+- Redis memory full → eviction of important keys
+
+Fix: Monitor with `redis-cli info`, set `maxmemory`, restart if unresponsive.
+
+**Scheduler/worker backlog:**
+- Workers crashed or not running
+- Custom scheduled tasks hanging
+
+Fix: `bench doctor`, check `logs/worker.error.log`, disable problematic scheduled tasks.
+
+**Browser-side freezes:**
+- Reports returning 100,000+ rows
+- Large child tables in forms
+- Stale JavaScript cache after upgrades
+
+Fix: Add LIMIT to reports, clear browser cache, run `bench build` after upgrades.
+
+### Slow Data Migration — The Fixture Trap
+
+If `bench migrate` takes an unusually long time, the most common cause (90% of cases) is a fixture with a huge number of records being re-inserted on every migration.
+
+**Diagnosis:**
+```bash
+# Check which doctype has excessive records
+bench --site your-site console
+```
+```python
+In [1]: frappe.db.count("Has Role")
+# If this returns 250,000+ you've found the problem
+```
+
+**Quick fix:**
+```python
+In [1]: frappe.db.truncate("Has Role")
+In [2]: frappe.db.commit()
+In [3]: exit
+```
+
+```bash
+bench --site your-site migrate
+```
+
+**Permanent fix — use `before_migrate` hook:**
+
+```python
+# hooks.py
+before_migrate = "your_app.utils.install.before_migrate"
+```
+
+```python
+# your_app/utils/install.py
+def before_migrate():
+    """Clean up duplicate fixture data before each migration"""
+    remove_duplicate_roles()
+
+def remove_duplicate_roles():
+    """
+    Frappe doesn't enforce unique constraints on user-role combinations by default.
+    Fixtures re-add roles on every migration without checking for duplicates,
+    causing the Has Role table to grow to hundreds of thousands of records.
+    """
+    frappe.db.truncate("Has Role")
+    frappe.db.commit()
+```
+
+This runs automatically before every `bench migrate`, keeping the table clean.
+
+**Why duplicates accumulate:** Fixtures assign roles to users on each migration without checking if the role is already assigned. Since there's no unique constraint on user-role combinations by default, records pile up silently over time.
+
+### Adding Indexes for Common Query Patterns
+
+```python
+# In a patch file: your_app/patches/add_performance_indexes.py
+import frappe
+
+def execute():
+    indexes = [
+        # Sales Order — common report filters
+        ("Sales Order", "idx_so_date_status", ["posting_date", "docstatus", "company"]),
+        # GL Entry — accounting reports
+        ("GL Entry", "idx_gle_date_account", ["posting_date", "account", "company"]),
+        # Stock Ledger Entry — inventory reports
+        ("Stock Ledger Entry", "idx_sle_date_item", ["posting_date", "item_code", "warehouse"]),
+    ]
+
+    for doctype, index_name, columns in indexes:
+        table = f"tab{doctype}"
+        col_list = ", ".join(f"`{c}`" for c in columns)
+
+        # Check if index already exists
+        existing = frappe.db.sql(f"""
+            SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = '{table}'
+            AND INDEX_NAME = '{index_name}'
+        """)
+
+        if not existing:
+            frappe.db.sql(f"ALTER TABLE `{table}` ADD INDEX `{index_name}` ({col_list})")
+            print(f"Created index {index_name} on {table}")
+```
+
+### Performance Monitoring Summary
+
+| Component | Check Command | Key Setting |
+|-----------|--------------|-------------|
+| Workers/Scheduler | `bench doctor` | — |
+| HTTP timeout | `bench config http_timeout 600` | 600s |
+| Gunicorn workers | `common_site_config.json` | `2 × cores + 1` |
+| MariaDB buffer | `SHOW VARIABLES LIKE 'innodb_buffer_pool_size'` | 70–80% RAM |
+| Slow queries | `/var/log/mysql/slow.log` | `long_query_time = 1` |
+| Redis memory | `redis-cli info memory` | Set `maxmemory` |
+| Swap | `free -m` | Never 0 |
+
+### After Any Configuration Change
+
+```bash
+bench setup supervisor
+bench setup nginx
+sudo supervisorctl reload
+sudo service nginx reload
+bench restart
+```

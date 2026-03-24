@@ -4,7 +4,9 @@ Asset Controller Example
 Chapter 5: The Controller – Document Class Deep Dive
 
 This example demonstrates a complete asset management controller
-with all lifecycle hooks, validation, and business logic.
+with all lifecycle hooks, validation, and business logic for ERPNext v16/Frappe v16.
+
+Updated with comprehensive type hints and modern Frappe framework practices.
 """
 
 from typing import List, Dict, Any, Optional, Union
@@ -16,7 +18,19 @@ from frappe import _
 class Asset(Document):
     """
     Asset Management Controller
-    Demonstrates complete document lifecycle management
+    Demonstrates complete document lifecycle management for ERPNext v16.
+    
+    Version Compatibility Notes:
+    - Document hooks: validate(), before_save(), on_submit(), after_submit(), etc.
+    - frappe.throw(): Standard error handling in v16
+    - frappe.db.exists(): Optimized for existence checks
+    - frappe.cache(): Standard caching mechanisms
+    - Type hints: Supported for better IDE integration
+    
+    Security Notes:
+    - Always validate user permissions before operations
+    - Use parameterized queries for database operations
+    - Implement proper audit logging
     """
     
     def __init__(self, *args, **kwargs) -> None:

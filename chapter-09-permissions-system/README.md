@@ -1297,3 +1297,454 @@ print(frappe.get_user_permissions())
 from frappe.permissions import get_doc_condition
 print(get_doc_condition('Sales Order', 'alice@example.com'))
 ```
+
+
+---
+
+## 📌 Addendum: Roles and Permissions — Complete Guide
+
+### Core Concepts
+
+**Permission** — a specific right to perform an action on a DocType. Stored as `DocPerm` records.
+
+**Role** — a collection of permissions grouped together. Users inherit all permissions from all their roles (permissions are additive).
+
+**Role Profile** — a collection of roles assigned as a group (simplifies user management).
+
+### Permission Types
+
+| Permission | Description |
+|-----------|-------------|
+| **Read** | View documents and fields |
+| **Write** | Modify documents and fields |
+| **Create** | Create new documents |
+| **Delete** | Remove documents |
+| **Submit** | Submit documents (submittable DocTypes) |
+| **Cancel** | Cancel submitted documents |
+| **Amend** | Create amended versions of cancelled documents |
+| **Report** | Access reports |
+| **Export** | Export data |
+| **Import** | Import data |
+| **Print** | Print documents |
+| **Email** | Email documents |
+| **Share** | Share documents with other users |
+
+### Permission Hierarchy
+
+1. **DocType Level** — can the user access this DocType at all?
+2. **Field Level** — which fields can the user see/edit? (controlled by `permlevel`)
+3. **Document Level** — which specific records can the user access? (User Permissions)
+
+### Permission Levels (permlevel)
+
+Permission levels (0-9) control field-level access. Each field has a `permlevel` property.
+
+**Critical rules:**
+- Level 0 is mandatory for document access — without it, users cannot access the document at all
+- Permission levels are NOT cumulative — having level 2 does NOT grant access to level 0 or 1
+- You must explicitly grant permissions at each level you want users to access
+
+**Example setup:**
+
+```
+Fields:
+- customer (permlevel: 0)
+- order_date (permlevel: 0)
+- discount_percentage (permlevel: 1)
+- profit_margin (permlevel: 2)
+
+Sales User Role:
+- Level 0: Read, Write, Create
+- Level 1: Read, Write
+- Level 2: Read only
+
+Result: Sales User can read/write customer and order_date,
+        read/write discount_percentage, but only read profit_margin
+```
+
+**Best practice permlevel scheme:**
+- Level 0: Basic fields everyone needs (customer, date, total)
+- Level 1: Standard editable fields (discount, notes)
+- Level 2: Sensitive fields (profit margin, cost)
+- Level 3+: Admin-only fields
+
+### User Permissions (Document-Level)
+
+User Permissions restrict users to specific document records based on linked document values.
+
+```
+User Permission: User="john@example.com", Allow="Customer", For Value="ABC Corp"
+→ John can only see documents where customer = "ABC Corp"
+```
+
+This works by automatically adding WHERE conditions to database queries.
+
+### Permission Management Tools
+
+1. **Permission Inspector** (`/app/permission-inspector`) — debug why a user has/doesn't have a specific permission
+2. **Role Permission Manager** (`/app/permission-manager`) — review and manage permissions for a role on a DocType
+3. **Role Permission for Page and Report** (`/app/role-permission-for-page-and-report`) — control access to pages and reports
+4. **User Permissions** (`/app/user-permission`) — restrict users to specific document records
+
+### Permission Checking Flow
+
+```
+User requests document
+    ↓
+Is Administrator? → Yes → Grant all access
+    ↓ No
+Check role permissions (permlevel 0)
+    ↓
+Apply "if owner" restrictions if applicable
+    ↓
+Apply User Permissions filtering
+    ↓
+Filter fields by permlevel access
+    ↓
+Return permitted documents/fields
+```
+
+### "If Owner" Permission
+
+When "If Owner" is checked on a permission rule, the permission only applies when `doc.owner == user`. This enables owner-based access control.
+
+Note: "If Owner" cannot be used with "Create" permission (documents don't have owners until created).
+
+### Programmatic Permission Checks
+
+```python
+# Check if user has permission
+frappe.has_permission("Customer", "write", doc=customer_doc)
+
+# Get all permissions for current user on a DocType
+perms = frappe.get_doc("DocType", "Customer").get_permissions()
+
+# Custom permission hook
+def has_permission(doc, user):
+    if doc.owner == user:
+        return True
+    return False
+
+# In hooks.py
+has_permission = {
+    "Customer": "my_app.permissions.has_permission"
+}
+
+# Add query conditions based on permissions
+def permission_query_conditions(user):
+    return f"`tabCustomer`.owner = '{user}'"
+
+permission_query_conditions = {
+    "Customer": "my_app.permissions.permission_query_conditions"
+}
+```
+
+### Row-Level Permissions
+
+```python
+# Restrict users to their own records
+def get_permission_query_conditions(user):
+    if not user:
+        user = frappe.session.user
+    
+    if "System Manager" in frappe.get_roles(user):
+        return ""  # No restrictions for System Manager
+    
+    return f"`tabSales Order`.owner = '{user}'"
+```
+
+
+---
+
+## Addendum: Source Article Insights
+
+### Roles, Permissions, and the Permission Hierarchy
+
+Frappe's access control operates at three levels:
+
+1. **DocType level** — can the user access this DocType at all?
+2. **Field level** — which fields can the user see/edit?
+3. **Document level** — which specific records can the user access?
+
+**Permissions are additive across roles.** A user with multiple roles gets the union of all permissions from all their roles.
+
+```python
+# Checking permissions programmatically
+import frappe
+
+# Check if current user has read permission on a DocType
+frappe.has_permission("Sales Order", "read")
+
+# Check permission for a specific document
+frappe.has_permission("Sales Order", "write", doc=so_doc)
+
+# Get all permissions for current user on a DocType
+perms = frappe.permissions.get_role_permissions(
+    frappe.get_meta("Sales Order"),
+    frappe.session.user
+)
+# Returns: {"read": 1, "write": 1, "create": 0, ...}
+```
+
+---
+
+### Permission Levels (permlevel)
+
+Permission levels (0–9) control field-level access. **They are NOT cumulative** — having level 2 does not grant level 0 or 1 access. Each level must be explicitly granted.
+
+**Level 0 is mandatory** — without it, users cannot access the document at all.
+
+```
+Typical permlevel scheme:
+  Level 0: Standard fields (customer, date, total) — everyone with access
+  Level 1: Editable fields (discount, notes) — sales staff
+  Level 2: Sensitive fields (profit margin, cost) — managers only
+  Level 3+: Admin-only fields
+```
+
+**Setting up permission rules for a role:**
+
+```
+Role: Sales User
+  - Level 0: Read, Write, Create
+  - Level 1: Read, Write
+  - Level 2: Read only
+
+Role: Sales Manager
+  - Level 0: Read, Write, Create, Delete
+  - Level 1: Read, Write
+  - Level 2: Read, Write   ← can edit sensitive fields
+```
+
+**How the system checks field access (Python):**
+
+```python
+# frappe/model/meta.py (simplified)
+def get_permlevel_access(self, permission_type="read"):
+    """Returns list of permlevels where user has the given permission."""
+    allowed_permlevels = []
+    for perm in self.get_permissions():
+        if perm.role in user_roles and perm.get(permission_type):
+            if perm.permlevel not in allowed_permlevels:
+                allowed_permlevels.append(perm.permlevel)
+    return allowed_permlevels  # e.g., [0, 1, 2]
+
+# Field access check — exact match, not range
+def has_permlevel_access_to(self, fieldname, permission_type="read"):
+    df = self.meta.get_field(fieldname)
+    return df.permlevel in self.get_permlevel_access(permission_type)
+```
+
+---
+
+### permission_query_conditions Hook
+
+This hook adds SQL WHERE conditions to database queries automatically. It filters data **at the database level** — users never see records they shouldn't.
+
+**When it's called:** Any `frappe.get_list()`, `frappe.get_all()`, or List View query.
+
+```python
+# my_app/doctype/sales_order/sales_order.py
+
+def get_permission_query_conditions(user):
+    """
+    Returns SQL WHERE condition to filter Sales Orders by user's company.
+    Called automatically when querying Sales Orders.
+    """
+    if not user:
+        user = frappe.session.user
+
+    if user == "Administrator":
+        return None  # No filtering for admin
+
+    # Get user's company
+    user_company = frappe.db.get_value("User", user, "company")
+    if user_company:
+        return f"`tabSales Order`.`company` = {frappe.db.escape(user_company)}"
+
+    return None
+```
+
+```python
+# hooks.py
+permission_query_conditions = {
+    "Sales Order": "my_app.doctype.sales_order.sales_order.get_permission_query_conditions"
+}
+```
+
+**Important rules:**
+- Return a SQL condition string **without** the `WHERE` keyword
+- Always use `frappe.db.escape()` to prevent SQL injection
+- Return `None` or `""` for no filtering (e.g., Administrator)
+- Use backtick-quoted table names: `` `tabDocType`.`fieldname` ``
+
+**More complex example (from Frappe core — Dashboard Chart):**
+
+```python
+def get_permission_query_conditions(user):
+    if user == "Administrator":
+        return None
+
+    allowed_doctypes = frappe.permissions.get_doctypes_with_read()
+    allowed_reports = get_allowed_report_names()
+
+    return f"""
+        ((`tabDashboard Chart`.`chart_type` in ('Count', 'Sum', 'Average')
+        and `tabDashboard Chart`.`document_type` in ({allowed_doctypes}))
+        or
+        (`tabDashboard Chart`.`chart_type` = 'Report'
+        and `tabDashboard Chart`.`report_name` in ({allowed_reports})))
+    """
+```
+
+---
+
+### has_permission Hook
+
+This hook checks access to a **specific document**. It's called when a user tries to open, save, or delete a document.
+
+**Key behavior:**
+- Return `True` to allow access
+- Return `False` to deny access (even if the user has role-based permission)
+- Return `None` to defer to default permission checks
+- This hook can only **deny** permissions, not grant new ones beyond what roles allow
+- Called in **reverse order** (last registered hook runs first)
+
+```python
+# my_app/doctype/sales_order/sales_order.py
+
+def has_permission(doc, ptype, user, debug=False):
+    """
+    Custom permission check for Sales Orders.
+    Users can only submit orders they created.
+    """
+    if not user:
+        user = frappe.session.user
+
+    if user == "Administrator":
+        return True
+
+    # For submit permission: only the creator can submit
+    if ptype == "submit":
+        if doc.owner == user:
+            return True
+        return False  # Deny submit for non-owners
+
+    # For other permissions: use default role-based checks
+    return None
+```
+
+```python
+# hooks.py
+has_permission = {
+    "Sales Order": "my_app.doctype.sales_order.sales_order.has_permission"
+}
+```
+
+---
+
+### Using Both Hooks Together
+
+The most secure pattern uses both hooks: `permission_query_conditions` filters lists, `has_permission` guards individual document access.
+
+```python
+# my_app/doctype/asset/asset.py
+
+def get_permission_query_conditions(user):
+    """Filter asset list to user's department."""
+    if not user:
+        user = frappe.session.user
+    if user == "Administrator":
+        return None
+
+    dept = frappe.db.get_value("Employee", {"user_id": user}, "department")
+    if dept:
+        return f"`tabAsset`.`department` = {frappe.db.escape(dept)}"
+    return None
+
+
+def has_permission(doc, ptype, user, debug=False):
+    """Allow write only if asset is in user's department."""
+    if not user:
+        user = frappe.session.user
+    if user == "Administrator":
+        return True
+
+    if ptype in ("write", "delete"):
+        dept = frappe.db.get_value("Employee", {"user_id": user}, "department")
+        if doc.department == dept:
+            return True
+        return False
+
+    return None  # Default for read and other types
+```
+
+```python
+# hooks.py
+permission_query_conditions = {
+    "Asset": "my_app.doctype.asset.asset.get_permission_query_conditions"
+}
+has_permission = {
+    "Asset": "my_app.doctype.asset.asset.has_permission"
+}
+```
+
+---
+
+### User Permissions (Document-Level Filtering)
+
+User Permissions restrict a user to specific document records based on linked field values. They work by automatically adding WHERE conditions to queries.
+
+```python
+# Create a User Permission programmatically
+frappe.get_doc({
+    "doctype": "User Permission",
+    "user": "john@example.com",
+    "allow": "Customer",           # The DocType being restricted
+    "for_value": "ABC Corp",       # The specific record allowed
+    "apply_to_all_doctypes": 0,
+    "applicable_for": "Sales Order"  # Only apply to Sales Orders
+}).insert()
+```
+
+**How it works:** When John queries Sales Orders, Frappe automatically adds:
+```sql
+WHERE `tabSales Order`.`customer` = 'ABC Corp'
+```
+
+**Key differences between the two hooks:**
+
+| | `permission_query_conditions` | `has_permission` |
+|---|---|---|
+| Level | DocType (all docs) | Single document |
+| Returns | SQL WHERE string | True/False/None |
+| Performance | Database-level (fast) | Application-level |
+| Use case | Filter lists/reports | Guard document access |
+
+---
+
+### Permission Management Tools
+
+**Permission Inspector** (`/app/permission-inspector`): Debug why a user has or doesn't have a specific permission. Shows all roles, all matching rules, and the final decision.
+
+**Role Permission Manager** (`/app/permission-manager`): View and edit all permission rules for a role on a DocType.
+
+**User Permissions** (`/app/user-permission`): Manage document-level restrictions per user.
+
+```python
+# Useful permission utilities
+import frappe.permissions
+
+# Get all doctypes a user can read
+readable = frappe.permissions.get_doctypes_with_read()
+
+# Get role permissions for a doctype
+meta = frappe.get_meta("Sales Order")
+perms = frappe.permissions.get_role_permissions(meta, frappe.session.user)
+
+# Check if user has a specific role
+frappe.user.has_role("Sales Manager")
+
+# Get all roles for current user
+roles = frappe.get_roles()
+```

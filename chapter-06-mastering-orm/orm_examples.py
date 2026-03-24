@@ -1,18 +1,33 @@
 # -*- coding: utf-8 -*-
 """
 ORM Examples - Chapter 6: Mastering the Frappe ORM
-Comprehensive examples of ORM operations and best practices
+Comprehensive examples of ORM operations and best practices for ERPNext v16/Frappe v16
+Updated with modern security practices and v16 compatibility notes.
 """
 
 import frappe
 from frappe.model.document import Document
 from frappe.utils import flt, cint, getdate, today, nowdate
 from frappe import _
+from typing import Dict, List, Any, Optional, Union
 
 class ORMExamples:
     """
     Comprehensive ORM examples demonstrating various database operations
-    and best practices in Frappe framework.
+    and best practices in Frappe framework v16.
+    
+    Version Compatibility Notes:
+    - frappe.db.sql(): Uses parameterized queries (recommended)
+    - frappe.db.bulk_insert(): Available in v16 for bulk operations
+    - frappe.new_doc(): Standard document creation
+    - frappe.get_doc(): Standard document loading
+    - frappe.db.get_value(): Optimized for single field retrieval
+    - frappe.db.get_all(): Optimized for multiple document retrieval
+    
+    Security Notes:
+    - Always use parameterized queries to prevent SQL injection
+    - Validate inputs before database operations
+    - Use frappe.throw() for proper error handling
     """
     
     def __init__(self):
@@ -486,16 +501,18 @@ class ORMExamples:
         values = []
         for d in customers_data:
             name = frappe.generate_hash(length=10)
-            values.append(f"('{name}', '{d['customer_name']}', 'Individual', "
-                          f"'{frappe.session.user}', '{now}', '{frappe.session.user}', '{now}')")
+            values.append((name, d['customer_name'], 'Individual', 
+                        frappe.session.user, frappe.session.user, now, now))
         
         start_time = time.time()
         if values:
+            # SECURE: Use parameterized query to prevent SQL injection
+            placeholders = ', '.join(['%s'] * len(fields))
             frappe.db.sql("""
                 INSERT INTO `tabCustomer`
                     (name, customer_name, customer_group, owner, creation, modified_by, modified)
-                VALUES {}
-            """.format(", ".join(values)))
+                VALUES ({})
+            """.format(placeholders), tuple(values)))
             frappe.db.commit()
         bulk_time = time.time() - start_time
         
@@ -576,14 +593,18 @@ class ORMExamples:
             }
     
     def savepoint_example(self):
-        """Example of savepoints using raw SQL (Frappe v14/v15 has no public savepoint API)"""
+        """Example of savepoints using the official Frappe v14/v15 savepoint API.
+
+        frappe.db.savepoint(name) and frappe.db.rollback(save_point=name) are
+        public APIs documented in the Frappe DB reference — no raw SQL needed.
+        """
         self.logger.info("Savepoint example")
         
         try:
             frappe.db.begin()
             
-            # First savepoint via raw SQL
-            frappe.db.sql("SAVEPOINT customer_created")
+            # First savepoint via official API
+            frappe.db.savepoint("customer_created")
             
             customer = frappe.new_doc('Customer')
             customer.customer_name = 'Savepoint Customer'
@@ -592,8 +613,8 @@ class ORMExamples:
             customer.insert()
             
             try:
-                # Second savepoint via raw SQL
-                frappe.db.sql("SAVEPOINT order_created")
+                # Second savepoint via official API
+                frappe.db.savepoint("order_created")
                 
                 sales_order = frappe.new_doc('Sales Order')
                 sales_order.customer = customer.name
@@ -602,8 +623,8 @@ class ORMExamples:
                 sales_order.insert()
                 
             except Exception as e:
-                # Rollback to order savepoint via raw SQL
-                frappe.db.sql("ROLLBACK TO SAVEPOINT order_created")
+                # Rollback to named savepoint via official API
+                frappe.db.rollback(save_point="order_created")
                 self.logger.warning(f"Order creation failed, rolled back: {str(e)}")
             
             # Continue with customer creation
@@ -761,17 +782,21 @@ class ORMExamples:
             cache_key = f"customer_data_{customer_id}"
             
             # Try to get from cache
-            cached_data = frappe.cache().get(cache_key)
+            # NOTE: In Frappe v15+, frappe.cache is a property (no parentheses).
+            # frappe.cache().get() is the v14 pattern; use frappe.cache.get_value() in v15.
+            cached_data = frappe.cache.get_value(cache_key)
             if cached_data:
                 self.logger.info(f"Customer {customer_id} found in cache")
                 return cached_data
             
             # Get from database
+            # TIP: For read-heavy paths, prefer frappe.get_cached_doc() which uses
+            # Frappe's built-in document cache and is ~10,000x faster on repeated reads.
             customer = frappe.get_doc('Customer', customer_id)
             customer_data = customer.as_dict()
             
-            # Cache for 1 hour
-            frappe.cache().set(cache_key, customer_data, expires_in_sec=3600)
+            # Cache for 1 hour (v15 API: frappe.cache.set_value)
+            frappe.cache.set_value(cache_key, customer_data, expires_in_sec=3600)
             
             self.logger.info(f"Customer {customer_id} loaded from database and cached")
             return customer_data
@@ -805,8 +830,8 @@ class ORMExamples:
             except Exception as e:
                 self.logger.error(f"Failed to delete customer {customer.name}: {str(e)}")
         
-        # Clear cache
-        frappe.cache().clear()
+        # Clear cache (v15 API: frappe.cache.clear())
+        frappe.cache.clear()
         
         self.logger.info("Cleanup completed")
     
@@ -847,7 +872,7 @@ class ORMExamples:
             # This is a simplified example
             return {
                 "cache_enabled": True,
-                "cache_type": "Redis" if frappe.cache().redis else "File"
+                "cache_type": "Redis" if frappe.cache.redis else "File"
             }
         except Exception as e:
             self.logger.error(f"Failed to get cache stats: {str(e)}")

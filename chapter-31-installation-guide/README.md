@@ -712,3 +712,567 @@ docker restart frappe_docker-backend-1 frappe_docker-queue-short-1 frappe_docker
 | Enable dev mode | `bench set-config -g developer_mode true` |
 | List sites | `bench list-sites` |
 | Drop site | `bench drop-site mysite.local` |
+
+
+---
+
+## 📌 Addendum: Platform-Specific Installation Guides
+
+### Docker Dev Setup (Recommended for All Platforms)
+
+Docker gives you a clean, reproducible environment without installing Python, Node, Redis, and MariaDB on your machine.
+
+**Prerequisites:**
+- [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
+- VS Code with [Remote Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
+- Git
+
+**Quick Start:**
+
+```bash
+# Step 1: Clone and setup
+git clone https://github.com/frappe/frappe_docker.git
+cd frappe_docker
+cp -R devcontainer-example .devcontainer
+cp -R development/vscode-example development/.vscode
+code .
+
+# Step 2: Open in Container
+# Press Ctrl+Shift+P → "Dev Containers: Reopen in Container"
+# Wait 5-10 minutes for first build
+
+# Step 3: Initialize bench (inside container terminal)
+bench init --skip-redis-config-generation frappe-bench
+cd frappe-bench
+
+# Step 4: Configure database & Redis
+bench set-config -g db_host mariadb
+bench set-config -g redis_cache redis://redis-cache:6379
+bench set-config -g redis_queue redis://redis-queue:6379
+bench set-config -g redis_socketio redis://redis-queue:6379
+
+# Step 5: Create site
+bench new-site --db-root-password 123 --admin-password admin \
+  --mariadb-user-host-login-scope=% your_site_name.localhost
+
+# Step 6: Start server
+bench start
+# Access at: http://development.localhost:8000
+```
+
+**Daily Workflow:**
+- Start: Open VS Code → `Ctrl+Shift+P` → "Dev Containers: Reopen in Container" → `bench start`
+- Stop: `Ctrl+Shift+P` → "Dev Containers: Reopen Folder Locally"
+
+**Common Docker Errors:**
+
+```bash
+# NameError: name 'null' is not defined
+bench clear-cache
+
+# Missing module (e.g., "Cannot find module 'superagent'")
+bench setup requirements
+
+# ValueError: id must not contain ":"
+# Fix in frappe/utils/backgroundjobs.py:
+def create_job_id(job_id=None):
+    if not job_id:
+        job_id = str(uuid4())
+    else:
+        job_id = job_id.replace(":", "|")
+    return f"{frappe.local.site}||{job_id}"
+```
+
+---
+
+### Linux Installation (Ubuntu/Debian)
+
+> Important: Install the exact versions of Python, Node, MariaDB, and frappe-bench that your team uses.
+
+```bash
+# 1. Update packages
+sudo apt-get update -y && sudo apt-get upgrade -y
+
+# 2. Install Git
+sudo apt-get install git
+
+# 3. Install Python
+sudo apt-get install python3-dev python3.10-dev python3-setuptools python3-pip python3-distutils
+
+# 4. Install Python virtual environment
+sudo apt-get install python3.10-venv
+
+# 5. Install MariaDB
+sudo apt install mariadb-server mariadb-client
+sudo mysql_secure_installation
+
+# 6. Configure MariaDB (add to /etc/mysql/my.cnf)
+sudo nano /etc/mysql/my.cnf
+```
+
+Add at end of file:
+```ini
+[mysqld]
+character-set-client-handshake = FALSE
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+
+[mysql]
+default-character-set = utf8mb4
+```
+
+```bash
+sudo service mysql restart
+
+# 7. Install Redis
+sudo apt-get install redis-server
+
+# 8. Install other dependencies
+sudo apt-get install xvfb libfontconfig wkhtmltopdf
+sudo apt-get install libmysqlclient-dev
+
+# 9. Install Node.js via nvm
+curl https://raw.githubusercontent.com/creationix/nvm/master/install.sh | bash
+source ~/.profile
+nvm install 18
+
+# 10. Install yarn
+sudo npm install -g yarn
+
+# 11. Install Frappe Bench (use pipx — recommended)
+sudo apt install pipx
+pipx ensurepath
+pipx install frappe-bench
+
+# 12. Initialize bench
+bench init --frappe-branch version-16 frappe-bench
+cd frappe-bench
+
+# 13. Create site
+bench new-site your-site-name.localhost
+
+# 14. Configure site
+bench --site your-site-name.localhost enable-scheduler
+bench --site your-site-name.localhost set-maintenance-mode off
+bench --site your-site-name.localhost set-config server_script_enabled true
+bench set-config -g developer_mode true
+
+# 15. Add to hosts and start
+bench --site your-site-name.localhost add-to-hosts
+bench start
+```
+
+---
+
+### macOS Installation (Intel)
+
+```bash
+# 1. Install Xcode & Homebrew
+xcode-select --install
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# 2. Install dependencies
+brew update
+brew install git
+brew install python@3.11
+brew install node@18
+brew install yarn
+brew install redis@6.2
+brew install mariadb@10.6
+brew install pkg-config swig fontconfig
+
+# 3. Set PATH (add to ~/.zshrc)
+export PATH="/usr/local/opt/python@3.11/bin:$PATH"
+export PATH="/usr/local/opt/mariadb@10.6/bin:$PATH"
+export PKG_CONFIG_PATH="/usr/local/opt/mariadb@10.6/lib/pkgconfig:$PKG_CONFIG_PATH"
+
+# 4. Install pipx and bench
+python3.11 -m pip install --user pipx
+python3.11 -m pipx ensurepath
+pipx install frappe-bench --python python3.11
+
+# 5. Install wkhtmltopdf
+curl -L --http1.1 -O "https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6-2/wkhtmltox-0.12.6-2.macos-cocoa.pkg"
+sudo installer -pkg wkhtmltox-0.12.6-2.macos-cocoa.pkg -target /
+
+# 6. Start services
+brew services start redis@6.2
+brew services start mariadb@10.6
+
+# 7. Configure MariaDB (add to /usr/local/etc/my.cnf)
+nano /usr/local/etc/my.cnf
+```
+
+Add:
+```ini
+[mysqld]
+character-set-client-handshake = FALSE
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+bind-address = 127.0.0.1
+
+[mysql]
+default-character-set = utf8mb4
+```
+
+```bash
+brew services restart mariadb@10.6
+
+# 8. Initialize bench and create site
+bench init --frappe-branch version-16 frappe-bench
+cd frappe-bench
+bench new-site your-site-name.localhost
+bench --site your-site-name.localhost enable-scheduler
+bench set-config -g developer_mode true
+bench --site your-site-name.localhost add-to-hosts
+bench start
+```
+
+---
+
+### Windows Installation (via WSL2)
+
+Frappe doesn't run natively on Windows. Use WSL2 (Windows Subsystem for Linux) to get a Linux environment.
+
+**Step 1: Enable WSL2**
+
+```powershell
+# Run as Administrator
+wsl --install
+# OR manually:
+Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux
+Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform
+```
+
+Fix Hyper-V if needed:
+```powershell
+bcdedit /set hypervisorlaunchtype auto
+# Restart computer
+```
+
+**Step 2: Install Ubuntu**
+
+```powershell
+wsl --install -d Ubuntu-24.04
+# Follow prompts to create username and password
+```
+
+| ERPNext Version | Ubuntu | Python | Node.js |
+|-----------------|--------|--------|---------|
+| v13.x | 20.04 | 3.8 | 14/16 |
+| v14.x | 22.04 | 3.10 | 16/18 |
+| v15.x+ | 24.04 | 3.12 | 18/20 |
+
+**Step 3: Fix WSL2 Internet Access**
+
+```powershell
+# In CMD (not PowerShell):
+echo [wsl2]> %USERPROFILE%\.wslconfig
+echo dnsTunneling=true>> %USERPROFILE%\.wslconfig
+echo networkingMode=mirrored>> %USERPROFILE%\.wslconfig
+wsl --shutdown
+wsl -d Ubuntu-24.04
+```
+
+**Step 4: Install Frappe in WSL2**
+
+Open Ubuntu terminal and follow the Linux installation steps above.
+
+**Step 5: Connect VS Code to WSL2**
+
+```bash
+# Install Remote-WSL extension
+code --install-extension ms-vscode-remote.remote-wsl
+
+# Open project in WSL
+wsl -d Ubuntu-24.04
+cd ~/frappe-bench
+code .
+```
+
+Then from VS Code: `Ctrl+Shift+P` → "Connect to WSL using Distro" → Ubuntu-24.04
+
+**Step 6: Fix "No process manager found" error**
+
+```bash
+pipx install honcho
+pipx inject frappe-bench honcho
+bench start
+```
+
+---
+
+### Version Compatibility Matrix
+
+| ERPNext | Frappe | Python | Node | MariaDB |
+|---------|--------|--------|------|---------|
+| v16.x | v16.x | 3.11+ | 18/20 | 10.6+ |
+| v15.x | v15.x | 3.11 | 18 | 10.6 |
+| v14.x | v14.x | 3.10 | 16/18 | 10.3+ |
+| v13.x | v13.x | 3.8 | 14 | 10.3 |
+
+### Post-Installation Checklist
+
+```bash
+# Install ERPNext on your site
+bench get-app erpnext
+bench --site your-site.localhost install-app erpnext
+
+# Run migrations
+bench --site your-site.localhost migrate
+
+# Enable developer mode (development only)
+bench set-config -g developer_mode true
+
+# Verify installation
+bench --site your-site.localhost doctor
+```
+
+### Useful bench Commands
+
+```bash
+bench list-sites                          # List all sites
+bench use your-site.localhost             # Set default site
+bench --site your-site.localhost console  # Python console
+bench --site your-site.localhost migrate  # Run migrations
+bench --site your-site.localhost backup   # Backup site
+bench update --reset                      # Update all apps
+bench restart                             # Restart all services
+bench clear-cache                         # Clear Redis cache
+```
+
+
+---
+
+## Addendum: Source Article Insights
+
+### Manual Installation on Ubuntu/Debian
+
+This is the standard bare-metal installation for a development or production server.
+
+```bash
+# 1. Update system
+sudo apt-get update -y && sudo apt-get upgrade -y
+sudo reboot
+
+# 2. Install system dependencies
+sudo apt-get install -y git
+sudo apt-get install -y python3-dev python3.10-dev python3-setuptools python3-pip python3-distutils
+sudo apt-get install -y python3.10-venv
+sudo apt-get install -y software-properties-common
+
+# 3. Install MariaDB
+sudo apt install -y mariadb-server mariadb-client
+sudo mysql_secure_installation
+# Prompts:
+#   Enter current password: (leave empty)
+#   Switch to unix_socket authentication: Y
+#   Change root password: Y
+#   Remove anonymous users: Y
+#   Disallow root login remotely: N
+#   Remove test database: Y
+#   Reload privilege tables: Y
+
+# 4. Configure MariaDB for utf8mb4
+sudo nano /etc/mysql/my.cnf
+# Add at the end:
+# [mysqld]
+# character-set-client-handshake = FALSE
+# character-set-server = utf8mb4
+# collation-server = utf8mb4_unicode_ci
+# [mysql]
+# default-character-set = utf8mb4
+
+sudo service mysql restart
+
+# 5. Install Redis
+sudo apt-get install -y redis-server
+
+# 6. Install wkhtmltopdf and other packages
+sudo apt-get install -y xvfb libfontconfig wkhtmltopdf
+sudo apt-get install -y libmysqlclient-dev
+sudo apt install -y curl
+
+# 7. Install Node.js via nvm
+curl https://raw.githubusercontent.com/creationix/nvm/master/install.sh | bash
+source ~/.profile
+nvm install 18
+
+# 8. Install npm and yarn
+sudo apt-get install -y npm
+sudo npm install -g yarn
+
+# 9. Install Frappe Bench
+sudo pip3 install frappe-bench
+
+# 10. Initialize bench (replace version and folder name)
+bench init --frappe-branch version-15 frappe-bench
+cd frappe-bench
+
+# 11. Create a new site
+bench new-site mysite.localhost
+
+# 12. Configure the site
+bench --site mysite.localhost enable-scheduler
+bench --site mysite.localhost set-maintenance-mode off
+bench --site mysite.localhost set-config server_script_enabled true
+
+# 13. Enable developer mode (dev machines only)
+bench set-config -g developer_mode true
+
+# 14. Add site to /etc/hosts (local dev)
+bench --site mysite.localhost add-to-hosts
+
+# 15. Start the server
+bench start
+# Access at http://mysite.localhost:8000
+```
+
+---
+
+### Docker-Based Development Environment
+
+The fastest way to get started — no local Python/Node/MariaDB installation required.
+
+**Prerequisites:** Docker Desktop, VS Code, Git
+
+```bash
+# 1. Clone frappe_docker
+git clone https://github.com/frappe/frappe_docker.git
+cd frappe_docker
+
+# 2. Copy dev container config
+cp -R devcontainer-example .devcontainer
+cp -R development/vscode-example development/.vscode
+
+# 3. Open in VS Code
+code .
+```
+
+**In VS Code:**
+1. Install extension: `ms-vscode-remote.remote-containers`
+2. Press `Ctrl+Shift+P` → "Dev Containers: Reopen in Container"
+3. Wait 5–10 minutes for first build
+
+**Inside the container terminal:**
+
+```bash
+# Initialize bench
+bench init --skip-redis-config-generation frappe-bench
+cd frappe-bench
+
+# Point to Docker services (not localhost)
+bench set-config -g db_host mariadb
+bench set-config -g redis_cache redis://redis-cache:6379
+bench set-config -g redis_queue redis://redis-queue:6379
+bench set-config -g redis_socketio redis://redis-queue:6379
+
+# Verify config
+cat sites/common_site_config.json
+# Should show: db_host, redis_cache, redis_queue, redis_socketio
+
+# Create site
+bench new-site \
+  --db-root-password 123 \
+  --admin-password admin \
+  --mariadb-user-host-login-scope=% \
+  development.localhost
+
+# Start server
+bench start
+# Access at http://development.localhost:8000
+```
+
+**Daily workflow:**
+- Start: `Ctrl+Shift+P` → "Dev Containers: Reopen in Container" → `bench start`
+- Stop: `Ctrl+Shift+P` → "Dev Containers: Reopen Folder Locally"
+
+---
+
+### Installing ERPNext and Custom Apps
+
+```bash
+# Install ERPNext
+bench get-app --branch version-15 erpnext
+bench --site mysite.localhost install-app erpnext
+
+# Install a custom app from GitHub
+bench get-app https://github.com/myorg/my-custom-app.git --branch main
+bench --site mysite.localhost install-app my_custom_app
+
+# List installed apps
+bench list-apps
+
+# Migrate after installing
+bench --site mysite.localhost migrate
+```
+
+---
+
+### Docker Image with Custom App
+
+For deploying your custom app via Docker:
+
+```bash
+# 1. Create apps.json
+cat > apps.json << 'EOF'
+[
+  {"url": "https://github.com/frappe/erpnext", "branch": "version-15"},
+  {"url": "https://github.com/myorg/my-custom-app", "branch": "main"}
+]
+EOF
+
+# 2. Build custom image
+export APPS_JSON_BASE64=$(base64 -w 0 apps.json)
+
+git clone https://github.com/frappe/frappe_docker
+cd frappe_docker
+
+docker build \
+  --build-arg FRAPPE_BRANCH=version-15 \
+  --build-arg APPS_JSON_BASE64=$APPS_JSON_BASE64 \
+  --file images/layered/Containerfile \
+  --tag myorg/my-frappe-app:latest \
+  .
+
+# 3. Run with Docker Compose
+# Edit pwd.yml: replace frappe/erpnext:v15.x.x with myorg/my-frappe-app:latest
+# Also update install-app command to include your app name
+
+docker compose -f pwd.yml up -d
+docker logs frappe_container-create-site-1 -f
+```
+
+---
+
+### Common Post-Installation Issues
+
+**NameError: name 'null' is not defined** (after switching branches):
+```bash
+bench clear-cache
+```
+
+**Missing Node module (e.g., "Cannot find module 'superagent'"):**
+```bash
+bench setup requirements
+```
+
+**ValueError: id must not contain ":"** (older Frappe versions):
+```bash
+# Best fix: update Frappe
+bench update --frappe
+# Or apply the patch manually in frappe/utils/backgroundjobs.py
+```
+
+**Site not accessible after setup:**
+```bash
+# Check if site is set as default
+cat sites/currentsite.txt
+
+# Set default site
+bench use mysite.localhost
+
+# Check Nginx/Supervisor status (production)
+sudo supervisorctl status
+sudo systemctl status nginx
+```

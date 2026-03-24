@@ -295,3 +295,170 @@ Workflows add a business process layer on top of Frappe's document submission sy
 ---
 
 **Next Chapter**: Translations and Internationalization — making your app speak every language.
+
+
+---
+
+## 📌 Addendum: Workflows — Complete Guide
+
+### What is a Workflow?
+
+A workflow in Frappe is a defined sequence of states and transitions that a document must follow during its lifecycle. Workflows are only applicable to **submittable DocTypes** (`is_submittable = 1`).
+
+**Key insight**: At the end of the day, every state maps to one of three docstatus values: 0 (Draft), 1 (Submitted), or 2 (Cancelled). Workflow states are just named versions of these three values.
+
+### Core Components
+
+**States** — a stage in the document's lifecycle:
+- State Name (e.g., "Pending Approval", "Approved", "Rejected")
+- Doc Status (0, 1, or 2)
+- Only Allow Edit For (role that can edit in this state)
+- Update Field / Update Value (optional field to update when entering this state)
+
+**Transitions** — how a document moves between states:
+- Action (button name shown to user, e.g., "Approve", "Reject")
+- Allowed (role that can execute this transition)
+- Next State (target state)
+- Condition (optional Python expression, e.g., `doc.grand_total > 1000`)
+
+### Document Status vs Workflow State
+
+| Field | Type | Values | Purpose |
+|-------|------|--------|---------|
+| `docstatus` | System field | 0, 1, 2 | Controls submission state |
+| `workflow_state` | Custom field | State names | Stores current workflow state name |
+| `status` | Optional custom | Any | User-friendly status field |
+
+### Default vs Custom Workflow
+
+**Default (no workflow):**
+```
+Draft (0) → Submitted (1) → Cancelled (2)
+Draft (0) → Cancelled (2)
+```
+
+**Custom workflow example:**
+```
+Draft (0) → Pending Approval (0) → Approved (1)
+                                 → Rejected (0) → Draft (0)
+Approved (1) → Cancelled (2)
+```
+
+### Workflow Rules
+
+- Cannot skip from docstatus 0 directly to docstatus 2
+- Cannot revert from docstatus 1 back to docstatus 0
+- Once cancelled (docstatus 2), no transitions are allowed
+- The first state must have docstatus = 0
+
+### Python API
+
+```python
+from frappe.model.workflow import (
+    get_workflow, get_workflow_name, get_transitions,
+    apply_workflow, can_cancel_document
+)
+
+# Get workflow for a DocType
+workflow = get_workflow("Sales Order")
+
+# Get available transitions for a document
+doc = frappe.get_doc("Sales Order", "SO-00001")
+transitions = get_transitions(doc)
+for t in transitions:
+    print(t["action"], "→", t["next_state"])
+
+# Apply a workflow action
+updated_doc = apply_workflow(doc, "Approve")
+
+# Check if document can be cancelled
+can_cancel = can_cancel_document("Sales Order")
+
+# Query documents by workflow state
+pending = frappe.get_all(
+    "Sales Order",
+    filters={"workflow_state": "Pending Approval", "docstatus": 0},
+    fields=["name", "customer", "grand_total"]
+)
+```
+
+### JavaScript API
+
+```javascript
+// Get available transitions
+frappe.workflow.get_transitions(frm.doc).then((transitions) => {
+    transitions.forEach((t) => {
+        console.log(t.action, "→", t.next_state);
+    });
+});
+
+// Apply workflow action
+frappe.xcall("frappe.model.workflow.apply_workflow", {
+    doc: frm.doc,
+    action: "Approve"
+}).then((updatedDoc) => {
+    frappe.model.sync(updatedDoc);
+    frm.refresh();
+});
+
+// Bulk workflow operations
+frappe.xcall("frappe.model.workflow.bulk_workflow_approval", {
+    docnames: ["SO-00001", "SO-00002"],
+    doctype: "Sales Order",
+    action: "Approve"
+});
+```
+
+### Form Script Integration
+
+```javascript
+frappe.ui.form.on("Sales Order", {
+    // Before workflow action is applied
+    before_workflow_action: function(frm) {
+        if (frm.doc.grand_total < 100) {
+            frappe.throw(__("Cannot approve orders less than 100"));
+        }
+    },
+    
+    // After workflow action is applied
+    after_workflow_action: function(frm) {
+        console.log("Workflow action completed");
+    }
+});
+```
+
+### Transition Conditions
+
+Conditions are Python expressions evaluated in a sandboxed environment:
+
+```python
+# Available variables: doc (as dict), frappe.session, frappe.utils
+doc.grand_total > 1000                          # Amount check
+doc.status == "Pending"                          # Status check
+frappe.session.user == doc.owner                 # Owner check
+frappe.db.get_value("Employee", {"user_id": frappe.session.user}, "department") == "Finance"
+```
+
+### Auto-Approve Pattern
+
+```python
+# In hooks.py doc_events
+def auto_approve_small_orders(doc, method):
+    if doc.grand_total < 1000:
+        from frappe.model.workflow import get_workflow, get_transitions, apply_workflow
+        workflow = get_workflow(doc.doctype)
+        if workflow:
+            transitions = get_transitions(doc)
+            approve = next((t for t in transitions if t["action"] == "Approve"), None)
+            if approve:
+                apply_workflow(doc, "Approve")
+```
+
+### Best Practices
+
+1. **Plan before implementing** — diagram your workflow and review with stakeholders
+2. **Use meaningful state names** — "Pending Finance Review" is better than "State 2"
+3. **Test with different roles** — verify each role sees the correct actions
+4. **Use transition conditions** — for different approval paths based on amount/type
+5. **Consider the Update Field** — maintain a user-friendly `status` field alongside `workflow_state`
+6. **Always use `apply_workflow()`** — don't manually set `workflow_state` to bypass validations

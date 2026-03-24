@@ -222,7 +222,8 @@ on_logout = "myapp.auth.on_logout"
 on_session_creation = "myapp.auth.on_session_creation"
 
 # Boot Session (data sent to client on login)
-boot_session = "myapp.boot.boot_session"
+# Note: boot_session is NOT a valid hook name — use extend_bootinfo instead
+extend_bootinfo = "myapp.boot.boot_session"
 
 # Installation
 after_install = "myapp.setup.after_install"
@@ -511,3 +512,94 @@ def execute():
 6. **Document everything** — future you will thank present you
 7. **Use `ignore_permissions=True`** only in background jobs and migrations, never in user-facing code
 8. **Commit after bulk operations** — `frappe.db.commit()` periodically in loops
+
+
+---
+
+## 📌 Addendum: ERPNext Customization Philosophy and Useful Tools
+
+### The Golden Rules of Customization
+
+1. **Never touch the core** — always create a new app to hold customizations
+2. **Hooks, patches, monkey patching, custom forms, property setters, server and client scripts** are the correct ways to customize core ERPNext or any Frappe app
+3. **Low-code first** — use built-in tools before writing code
+4. **Test thoroughly** — customizations can impact performance, security, and upgradeability
+
+### Customization vs Configuration vs Extension
+
+- **Configuration**: Setting up existing features (tax rates, currencies, workflows)
+- **Customization**: Modifying existing behavior (adding fields, changing logic)
+- **Extension**: Adding new features that don't exist (new DocTypes, new apps)
+- **Development**: Building entirely new systems from scratch
+
+### hooks.py — The Contract with Frappe
+
+The `hooks.py` file is like a contract between your app and the Frappe framework. It specifies exactly how and when your app participates in system events. The framework uses this configuration to dynamically compose and execute functions at runtime.
+
+Key hooks summary:
+
+| Hook | Purpose |
+|------|---------|
+| `doc_events` | Document lifecycle events (before_save, on_submit, etc.) |
+| `scheduler_events` | Scheduled tasks (daily, hourly, cron) |
+| `override_whitelisted_methods` | Replace built-in API methods |
+| `override_doctype_class` | Replace DocType controller classes |
+| `has_permission` | Custom permission logic |
+| `permission_query_conditions` | Add conditions to list queries |
+| `extend_bootinfo` | Modify data sent to client on login |
+| `on_login` / `on_logout` | Session lifecycle hooks |
+| `app_include_js` / `app_include_css` | Include custom assets |
+| `doctype_js` | DocType-specific JavaScript |
+
+### Frappe's Built-in Developer Tools
+
+#### Permission Inspector (`/app/permission-inspector`)
+Debugs why a user has or doesn't have a specific permission. Tests a combination of DocType + Document + User + Permission Type and shows detailed logs explaining the decision.
+
+Use when: debugging permission issues, verifying configurations, troubleshooting access problems.
+
+#### Role Permission Manager (`/app/permission-manager`)
+Reviews and manages permissions for a specific role on a specific DocType. Shows all permission rules, allows adding/modifying/removing rules.
+
+Use when: managing permissions for core/system DocTypes, bulk permission management.
+
+#### User Permissions (`/app/user-permission`)
+Restricts users to specific document records based on linked document values. Example: a Sales Manager can only see orders from their territory.
+
+How it works:
+1. Create a User Permission record
+2. Select the User
+3. Select the "Allow" DocType (what to restrict)
+4. Select the "For Value" (specific record to allow)
+5. Optionally select "Apply To" DocTypes
+
+#### Permitted Documents For User (Report)
+Shows only the documents a specific user can access. Useful for testing and verifying permission configurations.
+
+#### Impersonate User Tool
+Allows admin to log in as another user without knowing their password — for testing purposes only. Located at `/app/user/<user-name>`. Admin must provide a reason, which is notified to the user on their next login.
+
+#### System Console (`/app/system-console`)
+Run Python code or SQL queries directly from the browser. Has a "Commit" checkbox — if unchecked, changes are rolled back. Useful for testing code without creating files.
+
+#### Commit App (Third-party)
+A Frappe app that provides:
+1. Lists every API in your system with documentation and testing capability
+2. Draws ERD (Entity Relationship Diagram) for your database
+3. Lists all bench commands as a cheat sheet
+
+```bash
+bench get-app --branch main The-commit-company/commit
+bench --site {site_name} install-app commit
+# Access at: http://localhost:8000/commit
+```
+
+### Customization Considerations
+
+| Concern | Notes |
+|---------|-------|
+| Performance | High-code customizations can slow the system — always test |
+| Maintenance | Document everything — customizations make maintenance harder |
+| Security | Custom code can introduce vulnerabilities — follow best practices |
+| Upgradeability | Test customizations after every Frappe/ERPNext upgrade |
+| Support | Heavy customizations make community support harder |

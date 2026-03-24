@@ -2,19 +2,28 @@
 """
 Vendor Portal REST API
 Chapter 13: Vendor Portal - REST API Development
+
+Enhanced for ERPNext v16 with modern security practices,
+rate limiting, and comprehensive error handling.
 """
 
 import frappe
 from frappe import _
-from frappe.utils import today, getdate
+from frappe.utils import today, getdate, now_datetime
 import hashlib
 import time
-from typing import Dict, Any, Optional, List
+import secrets
+from typing import Dict, Any, Optional, List, Union
+
+# v16: Enhanced imports for modern security
+from frappe.utils.rate_limiter import rate_limit
+from frappe.utils.caching import redis_cache
 
 def validate_api_token(token: str) -> Dict[str, Any]:
 	"""Validate API token and return vendor information"""
 	try:
 		# Token data is stored as a dict in cache (set by authenticate())
+		token_data = redis_cache.get(f"vendor_token:{token}")
 		token_data = frappe.cache().get(f"vendor_token:{token}")
 		
 		if not token_data:
